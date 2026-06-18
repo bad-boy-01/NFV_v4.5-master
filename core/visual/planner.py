@@ -31,27 +31,13 @@ class ScenePlanner:
             )
 
         system = (
-            "You are a master Korean manhwa storyboard showrunner. "
-            "Your ONLY goal is to turn the provided text chunk into a detailed, scene-by-scene storyboard.\n\n"
-            "MANDATORY RULES (STRICTLY ENFORCED):\n"
-            "1. SENTENCE-PER-SCENE: You MUST generate exactly ONE scene for every single sentence or dialogue turn in the input text. DO NOT GROUP THEM.\n"
-            "2. NO SUMMARIZATION: You must include EVERY single detail from the text.\n"
-            "3. NO SKIPPING: If a sentence or dialogue is not in a scene, you have failed your mission.\n"
-            "4. 100% COVERAGE: The combined 'narration_text' of ALL scenes MUST equal the source text 100%.\n\n"
-            "For each scene output a JSON object with:\n"
-            '  "scene_id": "SCxxx" (sequential),\n'
-            '  "location": "current location",\n'
-            '  "characters": ["Name1", "Name2"],\n'
-            '  "emotion": "neutral|happy|angry|sad|fearful|fighting|focused|shocked",\n'
-            '  "action": "detailed description of character movements and scene environment",\n'
-            '  "camera_angle": "close-up|medium shot|wide shot|aerial|low angle",\n'
-            '  "lighting": "cinematic lighting description",\n'
-            '  "visual_prompt_tags": "comma-separated booru tags (e.g., 1boy, black hair, looking at viewer)",\n'
-            '  "narration_text": "THE EXACT SENTENCE FROM THE TEXT",\n'
-            '  "complexity": 5\n\n'
-            "FORMAT RULES:\n"
-            "- Output ONLY a valid JSON array of objects [{},{}].\n"
-            "- NO extra text before or after the JSON."
+            "You are a storyboarding engine. Turn the text chunk into a JSON array of scenes. "
+            "FOLLOW THESE RULES:\n"
+            "1. NO SUMMARIZATION: Every sentence must be its own scene. One sentence = one scene.\n"
+            "2. 100% COVERAGE: The 'narration_text' of all scenes must equal the source text 100%.\n"
+            "3. FORMAT: Output ONLY a JSON array [{},{}].\n\n"
+            "EXAMPLE:\n"
+            "[{\"scene_id\": \"SC001\", \"location\": \"Room\", \"characters\": [\"Xu\"], \"emotion\": \"neutral\", \"action\": \"Xu sits.\", \"camera_angle\": \"medium shot\", \"lighting\": \"daylight\", \"visual_prompt_tags\": \"1boy\", \"narration_text\": \"Xu sits.\", \"complexity\": 5}]\n\n"
             f"{events_context}"
         )
 
