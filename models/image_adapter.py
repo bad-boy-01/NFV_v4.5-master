@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # 6 emotional poses for character reference sheets
 POSE_PROMPTS = {
-    "front":  "full body, standing, neutral expression, arms at sides, front view, white background",
+    "front":  "character design sheet, concept art, turnaround, multiple views, front view, side view, back view, close-up portrait, simple background",
     "smile":  "upper body, smiling happily, slight head tilt, warm expression",
     "angry":  "upper body, angry expression, furrowed brows, clenched fists, intense glare",
     "crying": "upper body, crying, tears streaming, sad expression, downcast eyes",
@@ -538,11 +538,11 @@ class LocalImageAdapter:
             pose_seed = (seed_base + i * 1013) % (2**31 - 1)
             logger.info(f"  Generating {char_name}/{pose}…")
 
-            # Square format for character sheets (better face detail)
+            # Wider format for character sheets (fits multiple views)
             self.generate_image(
                 prompt, out_path, negative_prompt=neg,
                 seed=pose_seed,
-                generation_params={"width": 768, "height": 768, "steps": 25, "cfg": 7.0},
+                generation_params={"width": 1024, "height": 768, "steps": 25, "cfg": 7.0},
             )
 
     # ── Quality Filter ────────────────────────────────────────────────────────
