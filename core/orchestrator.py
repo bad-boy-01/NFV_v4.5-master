@@ -408,7 +408,7 @@ class UnifiedPipeline:
         coverage_validator = CoverageValidator(threshold=0.85)
         continuity_validator = ContinuityValidator(self.llm, importance_threshold=7)
         
-        words_per_chunk = self.config.get("storyboard.words_per_chunk", 500)
+        words_per_chunk = 250
         scenes_per_clip = self.config.get("storyboard.scenes_per_clip", 67)
         builder = ClipBuilder(scenes_per_clip=scenes_per_clip)
 
@@ -454,15 +454,38 @@ class UnifiedPipeline:
                 if getattr(self.llm, "is_cloud", False):
                     time.sleep(2)
 
-                # Attempt scene planning with validation retry.
-                # FIX: previously this loop unconditionally overwrote `scenes` on
-                # every attempt and used whichever one ran *last* — including
-                # cases where attempt 1 was a real (if thin) response and attempt
-                # 2 was a hardcoded mock fallback that overwrote it. Now we track
-                # every attempt and pick the best one: real content beats mock
-                # content beats nothing, and higher coverage beats lower coverage.
-                best_scenes = None
-                best_is_mock = True
+                # V5: Reduce effective chunk size for local model
+                # Overriding for local Qwen model stability
+                effective_words_per_chunk = 250
+                
+                # Re-chunking logic inside the loop if necessary is too complex,
+                # so we just force the re-chunking here.
+                # Actually, simply reducing words_per_chunk at the top level is easier:
+                # (See previous orchestrator change for word_per_chunk)
+                
+                # Scene planning with retries
+                best_scenes = []
+                best_coverage = 0.0
+                
+                for attempt in range(3):
+                    chunk_scenes = planner.plan_scenes(chunk_text, chunk_chapter, events=chunk_events)
+                    coverage = coverage_validator.check_coverage(chunk_text, chunk_scenes)
+                    
+                    if coverage > best_coverage:
+                        best_scenes = chunk_scenes
+                        best_coverage = coverage
+                        
+                    if coverage >= 85.0:
+                        break
+                    
+                    # V5: Early exit if LLM is stuck and not improving
+                    if attempt > 0 and abs(coverage - best_coverage) < 1.0:
+                        logger.warning("  Coverage stable and low, skipping further retries.")
+                        break
+                    
+                    time.sleep(2)
+                
+                chunk_scenes = best_scenes
                 best_coverage_ok = False
                 best_continuity_ok = False
                 attempts = 3  # was 2 — a flat 2s gap rarely outlasts a Groq 429 window
