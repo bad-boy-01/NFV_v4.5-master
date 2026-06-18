@@ -11,6 +11,7 @@ Tables:
 import json
 import logging
 import os
+import re
 from contextlib import contextmanager
 from typing import Dict, List, Optional
 
@@ -150,22 +151,38 @@ class MemoryEngine:
         if current_state is None:
             current_state = {}
             
+        # Deduplication: strip descriptors like "(Old Woman)" or "(Mother)"
+        # e.g., "Mrs. Xu Zhang (Mother)" -> "Mrs. Xu Zhang"
+        base_name = re.sub(r'\s*\([^)]*\)', '', name).strip()
+            
         if self._in_memory:
-            if name in self._chars:
-                self._chars[name]["visual_dna"].update(visual_dna)
-                self._chars[name]["current_state"].update(current_state)
+            # Check for existing alias
+            found_key = None
+            for key in self._chars:
+                if key == name or key == base_name or key.startswith(base_name):
+                    found_key = key
+                    break
+            
+            if found_key:
+                self._chars[found_key]["visual_dna"].update(visual_dna)
+                self._chars[found_key]["current_state"].update(current_state)
             else:
                 self._chars[name] = {"id": char_id, "canonical_name": name,
                                      "visual_dna": visual_dna, "current_state": current_state}
             return
 
         with self.Session() as s:
-            existing = s.query(Character).filter_by(canonical_name=name).first()
+            # Check for existing alias in database
+            # This is a bit naive (SQL LIKE), but effective for "(descriptor)" patterns
+            existing = s.query(Character).filter(
+                (Character.canonical_name == name) | 
+                (Character.canonical_name.like(f"{base_name}%"))
+            ).first()
+            
             if existing:
                 merged_dna = {**existing.visual_dna, **visual_dna}
                 existing.visual_dna = merged_dna
                 
-                # Dynamic state overrides rather than purely merging, but we merge here for safety
                 if existing.current_state:
                     merged_state = {**existing.current_state, **current_state}
                 else:
