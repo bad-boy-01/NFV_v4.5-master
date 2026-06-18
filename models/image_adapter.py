@@ -478,16 +478,16 @@ class LocalImageAdapter:
                             else:
                                 ref_img = imgs[0]
                             
-                            # V3 Fix: Ensure IP-Adapter image is passed correctly
-                            # For SDXL, we often need to set the image directly in the pipeline call
-                            kwargs["ip_adapter_image"] = ref_img
-                            logger.debug(f"  IP-Adapter applied: {len(valid_refs)} ref image(s)")
+                            # V4 Fix: SDXL IP-Adapter needs added_cond_kwargs
+                            # This fixes the 'requires image_embeds' and 'mat1/mat2' shape errors
+                            kwargs["added_cond_kwargs"] = {"image_embeds": ref_img}
+                            logger.debug(f"  IP-Adapter added_cond_kwargs applied")
                         except Exception as e:
                             logger.warning(f"  IP-Adapter injection failed: {e}")
 
         try:
-            # FIX: If prompt_embeds are present, diffusers handles added_cond_kwargs automatically
-            # but if IP-Adapter is active, we must ensure ip_adapter_image is passed.
+            # The prompt_embeds/pooled_prompt_embeds must not conflict with 
+            # the added_cond_kwargs if the UNet is configured for IP-Adapter
             image = self.pipeline(**kwargs).images[0]
             image.save(output_path)
             logger.info(f"  ✓ Saved: {os.path.basename(output_path)}")
