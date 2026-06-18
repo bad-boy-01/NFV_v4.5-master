@@ -67,7 +67,7 @@ class GroqLLMAdapter:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        for attempt in range(3):
+        for attempt in range(6):
             try:
                 r = requests.post(
                     self.api_url,
@@ -80,9 +80,9 @@ class GroqLLMAdapter:
                     timeout=120,
                 )
                 if r.status_code == 429:
-                    # Exponential backoff: 10s, 30s, 60s
-                    wait = [10, 30, 60][attempt]
-                    logger.warning(f"Groq Rate Limit (429). Attempt {attempt+1}/3. Waiting {wait}s...")
+                    # Exponential backoff: 10s, 30s, 60s, 120s, 180s, 300s
+                    wait = [10, 30, 60, 120, 180, 300][attempt]
+                    logger.warning(f"Groq Rate Limit (429). Attempt {attempt+1}/6. Waiting {wait}s...")
                     time.sleep(wait)
                     continue
                 
@@ -90,7 +90,7 @@ class GroqLLMAdapter:
                 return r.json()["choices"][0]["message"]["content"]
             except Exception as e:
                 logger.warning(f"Groq attempt {attempt+1} failed: {e}")
-                if attempt < 2:
+                if attempt < 5:
                     time.sleep(2)
         
         return "ERROR: GROQ_FAILED"
