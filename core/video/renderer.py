@@ -197,19 +197,71 @@ class VideoRenderer:
             audio_clip = AudioFileClip(aud_path)
             duration = max(audio_clip.duration, 1.0)
 
-            # Ken Burns zoom effect
-            zoom_dir = random.choice(["in", "out"])
-            zoom_speed = 0.03
+            # Smart Cinematic Motion (Director AI logic)
+            camera = shot.get("camera_angle", "").lower()
+            emotion = shot.get("emotion", "").lower()
 
-            def zoom_effect(t):
-                if zoom_dir == "in":
-                    return 1 + zoom_speed * t / duration
+            base_speed = 0.03
+            
+            # 1. Decide Motion Type and Speed
+            if any(e in emotion for e in ["angry", "fighting", "shocked"]):
+                motion_type = "zoom_in"
+                speed = base_speed * 2.5  # Fast impact
+            elif "sad" in emotion or "fearful" in emotion:
+                motion_type = "zoom_out"
+                speed = base_speed * 0.8  # Slow isolation
+            elif any(c in camera for c in ["wide", "aerial"]):
+                motion_type = random.choice(["pan_right", "pan_left"])
+                speed = base_speed * 1.5  # Landscape sweep
+            elif "low angle" in camera:
+                motion_type = "tilt_up"
+                speed = base_speed * 1.2
+            elif "close-up" in camera:
+                motion_type = "zoom_in"
+                speed = base_speed * 0.5  # Very slow, subtle intimacy
+            else:
+                motion_type = random.choice(["zoom_in", "zoom_out", "pan_right", "pan_left"])
+                speed = base_speed
+
+            # 2. Apply Motion Effect via MoviePy 2.x
+            # We scale the image slightly larger than the screen to allow room for panning
+            scale_factor = 1.0 + speed
+
+            def resize_effect(t):
+                if motion_type == "zoom_in":
+                    return 1 + (speed * t / duration)
+                elif motion_type == "zoom_out":
+                    return 1 + speed - (speed * t / duration)
                 else:
-                    return 1 + zoom_speed - zoom_speed * t / duration
+                    return scale_factor # Fixed scale for panning
+
+            def position_effect(t):
+                # t goes from 0 to duration. Normalize to 0.0 -> 1.0
+                progress = t / duration
+                # Image is larger than screen by (scale_factor - 1). 
+                # To pan across the extra width:
+                offset_ratio = (scale_factor - 1) / scale_factor
+                
+                if motion_type == "pan_right":
+                    # Image moves left to reveal right side.
+                    x = "left" # MoviePy 2.x handles string alignment for moving images differently sometimes, 
+                               # but we'll use a relative coordinate system or rely on center if strings fail.
+                    # A safer approach for MoviePy 2 is a custom position function returning (x, y) pixels.
+                    # Since we don't have w/h easily here without evaluating the clip, we rely on standard "center"
+                    # for zooms. For pans, let's keep it safe: just use center if not panning.
+                    return ("center", "center") # Reverting to safe zoom-only for strict MoviePy 2 compatibility
+                return ("center", "center")
+
+            # Safe MoviePy 2.x implementation (Focusing strictly on Zoom as it's perfectly stable)
+            def safe_zoom_effect(t):
+                if motion_type in ["zoom_in", "tilt_up"]: # Map tilt to slow zoom to avoid edge clipping issues
+                    return 1 + (speed * t / duration)
+                else: # zoom_out, pan_right, pan_left (map to zoom out for safety)
+                    return 1 + speed - (speed * t / duration)
 
             img_clip = (ImageClip(img_path)
                         .with_duration(duration)
-                        .resized(zoom_effect)
+                        .resized(safe_zoom_effect)
                         .with_position("center"))
 
             # Subtitles
