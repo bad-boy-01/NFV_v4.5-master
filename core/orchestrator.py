@@ -210,7 +210,7 @@ class UnifiedPipeline:
         for filename in translated_files:
             file_path = os.path.join(self.pm.dirs["output"], filename)
             text = self.pm.read_input(file_path)
-            chunks = _chunk_text(text, max_words=1500)
+            chunks = _chunk_text(text, max_words=750)
 
             for idx, chunk_data in enumerate(chunks):
                 sub_key = f"mem_{filename}_{idx}"
@@ -223,7 +223,7 @@ class UnifiedPipeline:
                 # Proactive delay to avoid Groq Rate Limits
                 import time
                 if getattr(self.llm, "is_cloud", False):
-                    time.sleep(2)
+                    time.sleep(5)
 
                 existing_chars = self.memory_db.get_all_characters()
                 existing_rels = self.memory_db.get_all_relationships()
