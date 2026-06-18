@@ -12,21 +12,7 @@ def run_pipeline(input_file):
     logger.info("Running kaggle_setup.sh...")
     subprocess.run(["bash", "kaggle_setup.sh"], check=True)
 
-    # 2. Start Ollama server
-    logger.info("Starting Ollama server...")
-    process = subprocess.Popen(
-        ["ollama", "serve"], 
-        stdout=subprocess.DEVNULL, 
-        stderr=subprocess.DEVNULL
-    )
-
-    # 3. Wait for Ollama to boot
-    time.sleep(10)
-    
-    # 4. Pull model
-    logger.info("Pulling qwen2.5:7b...")
-    subprocess.run(["ollama", "pull", "qwen2.5:7b"], check=True)
-    logger.info("Ollama is ready!")
+    # 2. Ollama setup skipped as per user request
 
     # 5. Run main.py
     logger.info(f"Running pipeline with input: {input_file}")
