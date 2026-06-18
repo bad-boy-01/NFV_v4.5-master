@@ -17,35 +17,8 @@ if [ -f /etc/ImageMagick-6/policy.xml ]; then
     sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml
 fi
 
-# 2. Install Ollama (only if not already present)
-echo "[2/5] Setting up Ollama..."
-if ! command -v ollama &> /dev/null; then
-    echo "  Installing Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
-else
-    echo "  Ollama already installed — skipping"
-fi
-
-# Start Ollama server in background
-ollama serve &> /tmp/ollama.log &
-echo "  Waiting for Ollama to start..."
-sleep 8
-
-# Pull LLM models (only if missing — saves download time on resume)
-pull_if_missing() {
-    if ollama list 2>/dev/null | grep -q "$1"; then
-        echo "  Model $1 already present — skipping"
-    else
-        echo "  Pulling $1..."
-        ollama pull "$1"
-    fi
-}
-
-pull_if_missing "qwen2.5:7b"
-# Optional: better reasoning model (needs ~10GB RAM)
-# pull_if_missing "deepseek-r1:8b"
-
-echo "  Ollama ready ✓"
+# 2. Skip Ollama
+echo "[2/5] Skipping Ollama setup as per user request..."
 
 # 3. Python packages
 echo "[3/5] Installing Python packages..."
