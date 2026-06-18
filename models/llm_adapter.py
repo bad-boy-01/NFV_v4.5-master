@@ -139,66 +139,92 @@ class GroqLLMAdapter:
         pass  # No-op for API-based adapters
 
 
-# ── Local Ollama Adapter ──────────────────────────────────────────────────────
-class LocalLLMAdapter:
+# ── DeepSeek API Adapter (Fallback) ───────────────────────────────────────────
+class DeepSeekLLMAdapter:
     """
-    Ollama-backed local LLM — 100% offline, no API key needed.
-    BUG FIX: unload_model previously used /api/api/generate (doubled path) — fixed.
+    DeepSeek API LLM (Extremely cheap, OpenAI compatible).
+    Set DEEPSEEK_API_KEY in Kaggle Secrets or environment variables.
     """
-    def __init__(self, host: str = "http://localhost:11434",
-                 model_name: str = "qwen2.5:7b"):
-        self.host = host.rstrip("/")
+    def __init__(self, model_name: str = "deepseek-chat", api_key: str = None):
         self.model_name = model_name
-        self.api_url = f"{self.host}/api/generate"   # Correct single path
-        self.is_cloud = False
+        self.api_key = api_key or self._load_key()
+        self.api_url = "https://api.deepseek.com/chat/completions"
+        self.is_cloud = True
+
+    def _load_key(self) -> str:
+        key = os.environ.get("DEEPSEEK_API_KEY", "")
+        if not key:
+            try:
+                from kaggle_secrets import UserSecretsClient  # type: ignore
+                key = UserSecretsClient().get_secret("DEEPSEEK_API_KEY")
+            except Exception:
+                pass
+        return key
 
     def check_health(self) -> bool:
-        try:
-            r = requests.get(f"{self.host}/api/tags", timeout=5)
-            return r.status_code == 200
-        except requests.ConnectionError:
-            logger.error(f"Cannot reach Ollama at {self.host}")
-            return False
+        return bool(self.api_key)
 
     def generate(self, prompt: str, system_prompt: str = None,
-                 temperature: float = 0.7, model: str = None,
-                 keep_alive: str = "5m", **kwargs) -> str:
-        selected = model or self.model_name
-        payload = {
-            "model": selected,
-            "prompt": prompt,
-            "stream": False,
-            "keep_alive": keep_alive,
-            "options": {"temperature": temperature},
-        }
+                 temperature: float = 0.7, model: str = None, **kwargs) -> str:
+        if not self.api_key:
+            return "ERROR: DEEPSEEK_NO_API_KEY"
+
+        messages = []
         if system_prompt:
-            payload["system"] = system_prompt
-        try:
-            r = requests.post(self.api_url, json=payload, timeout=600)
-            r.raise_for_status()
-            return r.json().get("response", "")
-        except Exception as e:
-            logger.warning(f"Ollama error ({selected}): {e}")
-            return f"ERROR: OLLAMA_FAILED ({selected})"
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        for attempt in range(3):
+            try:
+                r = requests.post(
+                    self.api_url,
+                    headers={"Authorization": f"Bearer {self.api_key}",
+                             "Content-Type": "application/json"},
+                    json={"model": model or self.model_name,
+                          "messages": messages,
+                          "temperature": temperature,
+                          "max_tokens": 4096},
+                    timeout=120,
+                )
+                if r.status_code == 429:
+                    wait = [10, 30, 60][attempt]
+                    logger.warning(f"DeepSeek Rate Limit (429). Attempt {attempt+1}/3. Waiting {wait}s...")
+                    time.sleep(wait)
+                    continue
+                
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"]
+            except Exception as e:
+                logger.warning(f"DeepSeek attempt {attempt+1} failed: {e}")
+                if attempt < 2:
+                    time.sleep(2)
+        
+        return "ERROR: DEEPSEEK_FAILED"
 
     def generate_json(self, prompt: str, system_prompt: str = None,
                       temperature: float = 0.1, model: str = None, **kwargs) -> str:
-        selected = model or self.model_name
-        payload = {
-            "model": selected,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": temperature},
-        }
+        messages = []
         if system_prompt:
-            payload["system"] = system_prompt
+            messages.append({"role": "system", "content": system_prompt + " You must output valid JSON."})
+        messages.append({"role": "user", "content": prompt})
+
         try:
-            r = requests.post(self.api_url, json=payload, timeout=600)
+            r = requests.post(
+                self.api_url,
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": "application/json"},
+                json={"model": model or self.model_name,
+                      "messages": messages,
+                      "temperature": temperature,
+                      "response_format": {"type": "json_object"},
+                      "max_tokens": 4096},
+                timeout=120,
+            )
             r.raise_for_status()
-            content = r.json().get("response", "")
+            content = r.json()["choices"][0]["message"]["content"]
             return self._repair(content)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"DeepSeek JSON mode failed or unsupported: {e}")
             content = self.generate(prompt, system_prompt, temperature, model, **kwargs)
             return self._repair(content)
 
@@ -212,29 +238,15 @@ class LocalLLMAdapter:
         except Exception:
             return content
 
-    def unload_model(self, model_name: str = None):
-        """
-        BUG FIX: Previous code did api_url.replace('/generate', '/api/generate')
-        which produced the doubled path http://host/api/api/generate.
-        Correct: POST to /api/generate with keep_alive=0.
-        """
-        target = model_name or self.model_name
-        try:
-            requests.post(
-                self.api_url,   # Already correct: http://host/api/generate
-                json={"model": target, "keep_alive": 0},
-                timeout=10,
-            )
-            logger.info(f"Ollama unloaded: {target}")
-        except Exception as e:
-            logger.debug(f"Unload failed for {target}: {e}")
+    def unload_model(self, *args, **kwargs):
+        pass
 
 
-# ── Smart Adapter: tries Groq first, falls back to Ollama ────────────────────
+# ── Smart Adapter: tries Groq first, falls back to DeepSeek ────────────────────
 class SmartLLMAdapter:
     """
     Tries Groq (free cloud) first by default, but honors 'provider' setting.
-    If 'provider' is 'ollama', it uses Ollama as primary.
+    If 'provider' is 'deepseek', it uses DeepSeek as primary.
 
     Fallback visibility (fixes the silent-mock-substitution bug):
     - `last_call_was_fallback` is set on every call so callers can check
@@ -251,8 +263,7 @@ class SmartLLMAdapter:
 
         provider = models.get("provider", "groq").lower()
         groq_model = models.get("model", "llama-3.3-70b-versatile")
-        ollama_host = models.get("ollama_host", "http://localhost:11434")
-        ollama_model = models.get("ollama_model", "qwen2.5:7b")
+        deepseek_model = models.get("deepseek_model", "deepseek-chat")
         # NOTE: previously defined in config/default.yaml (under `system:`)
         # but never read anywhere in the codebase — strict_mode had no
         # effect regardless of its value.
@@ -263,18 +274,18 @@ class SmartLLMAdapter:
         self.total_calls = 0
 
         self._groq = GroqLLMAdapter(model_name=groq_model)
-        self._ollama = LocalLLMAdapter(host=ollama_host, model_name=ollama_model)
+        self._deepseek = DeepSeekLLMAdapter(model_name=deepseek_model)
 
         # Pick primary adapter based on provider setting
-        if provider == "ollama" and self._ollama.check_health():
-            self._primary = self._ollama
-            logger.info(f"LLM: Using Ollama ({ollama_model}) as primary")
+        if provider == "deepseek" and self._deepseek.check_health():
+            self._primary = self._deepseek
+            logger.info(f"LLM: Using DeepSeek ({deepseek_model}) as primary")
         elif self._groq.check_health():
             self._primary = self._groq
             logger.info("LLM: Using Groq free-tier (llama-3.3-70b) as primary")
-        elif self._ollama.check_health():
-            self._primary = self._ollama
-            logger.info(f"LLM: Using Ollama ({ollama_model}) as fallback primary")
+        elif self._deepseek.check_health():
+            self._primary = self._deepseek
+            logger.info(f"LLM: Using DeepSeek ({deepseek_model}) as fallback primary")
         else:
             self._primary = None
             logger.warning("LLM: No adapter available — mock mode active")
@@ -322,8 +333,17 @@ class SmartLLMAdapter:
         )
 
         if "ERROR:" in result:
-            logger.warning(f"Primary LLM failed ({result}). Skipping fallback and exhausting...")
-            return self._handle_exhausted(system_prompt or "", prompt)
+            logger.warning(f"Primary LLM failed ({result}). Trying fallback...")
+            # If Groq failed, try DeepSeek
+            if self._primary == self._groq and self._deepseek.check_health():
+                result = self._deepseek.generate(
+                    prompt, system_prompt=system_prompt,
+                    temperature=temperature, model=model, **kwargs
+                )
+
+            # If DeepSeek also fails or was the primary, exhaust to mock/strict
+            if "ERROR:" in result:
+                return self._handle_exhausted(system_prompt or "", prompt)
 
         return result
 
@@ -342,8 +362,15 @@ class SmartLLMAdapter:
         )
 
         if "ERROR:" in result:
-            logger.warning(f"Primary LLM JSON failed ({result}). Skipping fallback and exhausting...")
-            return self._handle_exhausted(system_prompt or "", prompt)
+            logger.warning(f"Primary LLM JSON failed ({result}). Trying fallback...")
+            if self._primary == self._groq and self._deepseek.check_health():
+                result = self._deepseek.generate_json(
+                    prompt, system_prompt=system_prompt,
+                    temperature=temperature, model=model, **kwargs
+                )
+
+            if "ERROR:" in result:
+                return self._handle_exhausted(system_prompt or "", prompt)
 
         return result
 
