@@ -1,3 +1,4 @@
+
 """
 LLM Adapter — Novel Video Factory v4
 PRIMARY:  Groq free-tier (llama-3.3-70b) — sign up FREE at console.groq.com
@@ -113,7 +114,7 @@ class GroqLLMAdapter:
                       "messages": messages,
                       "temperature": temperature,
                       "response_format": {"type": "json_object"},
-                      "max_tokens": 4096},
+                      "max_tokens": 1500},
                 timeout=120,
             )
             r.raise_for_status()
