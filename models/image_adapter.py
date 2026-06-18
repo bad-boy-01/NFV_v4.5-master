@@ -233,12 +233,15 @@ class LocalImageAdapter:
             return
         try:
             from compel import Compel, ReturnedEmbeddingsType
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             self._compel = Compel(
                 tokenizer=[self.pipeline.tokenizer, self.pipeline.tokenizer_2],
                 text_encoder=[self.pipeline.text_encoder, self.pipeline.text_encoder_2],
                 returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
                 requires_pooled=[False, True],
                 truncate_long_prompts=False,
+                device=device,
             )
             logger.info("Compel long-prompt encoder loaded ✓ (prompts >77 tokens are chunked, not truncated)")
         except Exception as e:
