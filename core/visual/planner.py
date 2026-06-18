@@ -31,14 +31,13 @@ class ScenePlanner:
             )
 
         system = (
-            "You are a Korean manhwa storyboard showrunner. "
-            "Your goal is to turn the provided text chunk into a detailed, scene-by-scene storyboard.\n\n"
-            "MANDATORY RULES:\n"
-            "1. NO SUMMARIZATION: You must include EVERY sentence from the text in the 'narration_text' fields.\n"
-            "2. HIGH SCENE DENSITY: Generate at least 15 scenes for this chunk. Every sentence or action must be a scene.\n"
-            "3. NO SKIPPING: If a sentence is not in a scene, you have failed.\n"
-            "4. A new scene starts for every action, dialogue, or change in camera angle.\n"
-            "5. The combined 'narration_text' of all scenes MUST equal the source text 100%.\n\n"
+            "You are a master Korean manhwa storyboard showrunner. "
+            "Your ONLY goal is to turn the provided text chunk into a detailed, scene-by-scene storyboard.\n\n"
+            "MANDATORY RULES (STRICTLY ENFORCED):\n"
+            "1. SENTENCE-PER-SCENE: You MUST generate exactly ONE scene for every single sentence or dialogue turn in the input text. DO NOT GROUP THEM.\n"
+            "2. NO SUMMARIZATION: You must include EVERY single detail from the text.\n"
+            "3. NO SKIPPING: If a sentence or dialogue is not in a scene, you have failed your mission.\n"
+            "4. 100% COVERAGE: The combined 'narration_text' of ALL scenes MUST equal the source text 100%.\n\n"
             "For each scene output a JSON object with:\n"
             '  "scene_id": "SCxxx" (sequential),\n'
             '  "location": "current location",\n'
