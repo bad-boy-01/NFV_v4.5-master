@@ -11,9 +11,9 @@ project:
 # ─── Models ──────────────────────────────────────────────────
 models:
   llm:
-    # Primary: Ollama local (qwen2.5:7b) - recommended to avoid Groq rate limits
+    # Primary: Groq local (qwen2.5:7b) - recommended to avoid Groq rate limits
     # Fallback: Groq free-tier (sign up FREE at console.groq.com)
-    provider: "ollama"           # "groq" | "ollama"
+    provider: "groq"           # "groq" | "ollama"
     model: "llama-3.3-70b-versatile"   # Groq free model
     planning_model: "llama-3.3-70b-versatile"
     translation_model: "llama-3.3-70b-versatile"
