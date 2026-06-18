@@ -180,7 +180,9 @@ class MemoryEngine:
             ).first()
             
             if existing:
-                merged_dna = {**existing.visual_dna, **visual_dna}
+                e_dna = existing.visual_dna if existing.visual_dna is not None else {}
+                v_dna = visual_dna if visual_dna is not None else {}
+                merged_dna = {**e_dna, **v_dna}
                 existing.visual_dna = merged_dna
                 
                 if existing.current_state:
