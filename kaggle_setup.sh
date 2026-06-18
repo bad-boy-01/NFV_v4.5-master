@@ -10,7 +10,7 @@ echo "=========================================="
 # 1. System packages
 echo "[1/5] Installing system packages..."
 apt-get update -qq
-apt-get install -y -qq zstd espeak-ng imagemagick libgl1-mesa-glx ffmpeg libsm6 libxext6
+apt-get install -y -qq zstd espeak-ng imagemagick libgl1-mesa-glx ffmpeg libsm6 libxext6 cmake g++
 
 # Fix ImageMagick policy that blocks PDF/video operations
 if [ -f /etc/ImageMagick-6/policy.xml ]; then

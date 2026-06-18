@@ -19,8 +19,17 @@ class ScenePlanner:
         self.llm = llm_adapter
         self.config = config or {}
 
-    def plan_scenes(self, text_chunk: str, chapter: int = 1) -> List[Dict]:
+    def plan_scenes(self, text_chunk: str, chapter: int = 1, events: List[Dict] = None) -> List[Dict]:
         """Convert a text chunk into a list of visual scenes."""
+        events_context = ""
+        if events:
+            # Provide the LLM with the ground-truth events so it doesn't skip them
+            events_text = "\n".join([f"- {e.get('summary', '')}" for e in events])
+            events_context = (
+                f"\nCRITICAL: Ensure your scenes cover the following key events:\n"
+                f"{events_text}\n"
+            )
+
         system = (
             "You are a Korean manhwa storyboard showrunner. "
             "Break the following story text into visual SCENES. "
@@ -42,6 +51,7 @@ class ScenePlanner:
             "- narration_text must come from the actual text, not invented\n"
             "- Aim for 1 scene per 3-5 sentences\n"
             "- Output ONLY a JSON array. NO extra text outside the array."
+            f"{events_context}"
         )
 
         response = self.llm.generate_json(text_chunk, system_prompt=system, temperature=0.2)

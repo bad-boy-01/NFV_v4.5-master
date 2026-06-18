@@ -129,13 +129,13 @@ class VideoRenderer:
     def _render_clip(self, clip: dict, output_path: str) -> bool:
         """Render one 10-minute clip from its shots."""
         try:
-            # Import moviepy here (not at module level) so import failure is graceful
-            from moviepy.editor import (ImageClip, AudioFileClip,
-                                        concatenate_videoclips,
-                                        TextClip, CompositeVideoClip, ColorClip)
+            # Import moviepy 2.x style
+            from moviepy import (ImageClip, AudioFileClip,
+                                 concatenate_videoclips,
+                                 TextClip, CompositeVideoClip, ColorClip)
         except ImportError:
             logger.error("moviepy not installed — cannot render video. "
-                         "Run: pip install moviepy==1.0.3")
+                         "Run: pip install moviepy>=2.1.1")
             return False
 
         clip_id = clip["clip_id"]
@@ -173,19 +173,12 @@ class VideoRenderer:
                 except Exception:
                     pass
             gc.collect()
-            # Import torch safely (only if available)
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
 
     def _render_shot(self, shot: dict, clip_id: str):
         """Render one shot (image + audio + subtitles)."""
         try:
-            from moviepy.editor import (ImageClip, AudioFileClip,
-                                        TextClip, CompositeVideoClip, ColorClip)
+            from moviepy import (ImageClip, AudioFileClip,
+                                 TextClip, CompositeVideoClip, ColorClip)
         except ImportError:
             return None
 
@@ -215,9 +208,9 @@ class VideoRenderer:
                     return 1 + zoom_speed - zoom_speed * t / duration
 
             img_clip = (ImageClip(img_path)
-                        .set_duration(duration)
-                        .resize(zoom_effect)
-                        .set_position("center"))
+                        .with_duration(duration)
+                        .resized(zoom_effect)
+                        .with_position("center"))
 
             # Subtitles
             subtitle_text = shot.get("narration_text", "").strip()
@@ -227,7 +220,7 @@ class VideoRenderer:
                 except Exception as te:
                     logger.debug(f"Subtitle failed for {shot_id}: {te}")
 
-            return img_clip.set_audio(audio_clip)
+            return img_clip.with_audio(audio_clip)
 
         except Exception as e:
             logger.error(f"Failed to render shot {shot_id}: {e}")
@@ -235,20 +228,9 @@ class VideoRenderer:
 
     def _add_subtitles(self, img_clip, text: str, duration: float):
         """
-        Add subtitle overlay to an ImageClip.
-
-        Previously this grouped narration by *sentence count* (max 2
-        sentences) and showed each group as one fixed block for an evenly
-        divided share of the shot's duration. A single long sentence —
-        extremely common in narrated prose — still produced 3-4 lines that
-        filled much of the frame, exactly as reported. Now groups are
-        capped by *estimated line count* at the actual configured font
-        size/box width (target: 2 lines), splitting on word boundaries
-        wherever needed, and each group's on-screen time is proportional
-        to its word count rather than split evenly — a 3-word group no
-        longer gets the same screen time as a 12-word group.
+        Add subtitle overlay to an ImageClip using MoviePy 2.x API.
         """
-        from moviepy.editor import TextClip, CompositeVideoClip, ColorClip
+        from moviepy import TextClip, CompositeVideoClip, ColorClip
 
         words = text.split()
         if not words:
@@ -257,9 +239,7 @@ class VideoRenderer:
         w = img_clip.w
         box_w = int(w * 0.85)
         # Rough estimate of average glyph advance for a bold sans font:
-        # ~0.55x the font size in pixels. Used only to decide where to
-        # break lines for timing/grouping purposes — moviepy's own
-        # "caption" wrapping still does the actual visual line-wrapping.
+        # ~0.55x the font size in pixels.
         chars_per_line = max(10, int(box_w / (self.font_size * 0.55)))
         max_chars = chars_per_line * 2  # target: ~2 lines per caption group
 
@@ -295,27 +275,28 @@ class VideoRenderer:
                 g_dur = max(0.1, duration * (len(gw) / total_words))
 
             txt = TextClip(
-                g_text,
+                text=g_text,
                 font=self.font,
-                fontsize=self.font_size,
+                font_size=self.font_size,
                 color="white",
                 method="caption",
                 size=(box_w, None),
-                align="center",
-            ).set_duration(g_dur).set_start(t_cursor)
+                text_align="center",
+            ).with_duration(g_dur).with_start(t_cursor)
 
             bg_h = txt.h + 30
             bg = (ColorClip(size=(w, bg_h), color=(0, 0, 0))
-                  .set_opacity(0.45)
-                  .set_duration(g_dur)
-                  .set_start(t_cursor)
-                  .set_position(("center", "bottom")))
+                  .with_opacity(0.45)
+                  .with_duration(g_dur)
+                  .with_start(t_cursor)
+                  .with_position(("center", "bottom")))
 
-            txt = txt.set_position(("center", img_clip.h - bg_h + 15))
+            txt = txt.with_position(("center", img_clip.h - bg_h + 15))
             subtitle_clips.extend([bg, txt])
             t_cursor += g_dur
 
         return CompositeVideoClip([img_clip] + subtitle_clips)
+
 
     def _stitch_final(self, clip_paths: List[str]):
         """

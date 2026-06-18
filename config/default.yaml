@@ -30,14 +30,14 @@ models:
     num_inference_steps: 20
     guidance_scale: 7.0
     use_fast_scheduler: true    # DPM++ 2M Karras (30% faster than DDIM)
-    use_ip_adapter: true        # Character consistency
-    # ip-adapter-plus-face is specifically tuned for facial identity —
-    # the plain ip-adapter_sdxl.bin (and the 0.35 scale this used to be set
-    # to) is tuned more for general style/composition transfer and was too
-    # weak to reliably keep a character's face/outfit consistent across
-    # independently-generated shots.
+    
+    # ── Identity Preservation ────────────────────────────────
+    # Method: "pulid" (BEST for facial identity) or "ip-adapter"
+    identity_method: "pulid" 
+    use_ip_adapter: true        # Fallback if pulid is disabled
     ip_adapter_weight_name: "ip-adapter-plus-face_sdxl_vit-h.bin"
     ip_adapter_scale: 0.65
+    pulid_scale: 0.8            # Strength of PuLID identity (0.0 - 1.0)
 
   # ── Audio ─────────────────────────────────────────────────
   audio:
@@ -71,6 +71,10 @@ quality_filter:
   enabled: true
   max_retries: 3
   min_file_size_kb: 10
+  # Smart Identity Check (requires identity_method to be active)
+  # Compares generated face against reference images.
+  identity_check_enabled: true
+  identity_threshold: 0.70      # Similarity score (0.0 to 1.0)
 
 # ─── Character Sheets ────────────────────────────────────────
 character_sheet:

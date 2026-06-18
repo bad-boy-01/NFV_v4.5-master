@@ -117,6 +117,13 @@ class UnifiedPipeline:
         """Run the entire pipeline from start to finish."""
         if source_file:
             self.import_source(source_file)
+            
+        if not getattr(self.llm, "is_available", True):
+            logger.error("🛑 CRITICAL: No LLM provider is reachable. The pipeline cannot run.")
+            logger.error("   → If using Ollama (local): Ensure the server is running (`ollama serve`).")
+            logger.error("   → If using Groq (cloud): Ensure GROQ_API_KEY is set in your environment.")
+            return
+            
         self.stage_translate()
         self.stage_memory()
         self.stage_character_sheets()
@@ -166,6 +173,12 @@ class UnifiedPipeline:
                 continue
 
             text = self.pm.read_input(file_path)
+            
+            if pipeline.is_translation_needed(text):
+                if not getattr(self.llm, "is_available", True):
+                    logger.error(f"❌ Stage 1 Aborted: Translation required for {filename} but no LLM provider is reachable.")
+                    return
+            
             translated = pipeline.process_chapter(text)
             self.pm.save_output(out_name, translated)
             self.pm.save_checkpoint("translate", "done", sub_key=filename)
@@ -176,6 +189,11 @@ class UnifiedPipeline:
     # ── Stage 2: Memory Extraction ────────────────────────────────────────────
     def stage_memory(self):
         logger.info("─── Stage 2: Memory Extraction ───")
+        if not getattr(self.llm, "is_available", True):
+            logger.error("❌ Stage 2 Aborted: No LLM provider reachable (Groq/Ollama). "
+                         "Check your internet or start Ollama local server.")
+            return
+
         from core.memory.extractor import MemoryExtractor
 
         translated_files = sorted(
@@ -228,7 +246,8 @@ class UnifiedPipeline:
                 for c in data.get("characters", []):
                     cid = str(uuid.uuid4())[:8]
                     self.memory_db.add_character(cid, c.get("canonical_name", "Unknown"),
-                                                 c.get("visual_dna", {}))
+                                                 c.get("visual_dna", {}),
+                                                 c.get("current_state", {}))
                 for loc in data.get("locations", []):
                     self.memory_db.add_location(
                         loc.get("canonical_name", "Unknown"),
@@ -245,6 +264,17 @@ class UnifiedPipeline:
                     self.memory_db.add_relationship(
                         rel.get("char1", ""), rel.get("char2", ""),
                         rel.get("type", "other"), rel.get("description", ""),
+                    )
+                for event in data.get("events", []):
+                    inv_chars = event.get("involved_characters", [])
+                    if isinstance(inv_chars, list):
+                        inv_chars = ", ".join(inv_chars)
+                    self.memory_db.add_event(
+                        summary=event.get("summary", ""),
+                        importance=event.get("importance", 5),
+                        involved_characters=inv_chars,
+                        location=event.get("location", ""),
+                        source_chunk=sub_key
                     )
 
                 # Save world style from first chunk only if not already saved
@@ -329,11 +359,17 @@ class UnifiedPipeline:
     # ── Stage 4: Visual Planning ──────────────────────────────────────────────
     def stage_visual_planning(self):
         logger.info("─── Stage 4: Visual Planning ───")
+        if not getattr(self.llm, "is_available", True):
+            logger.error("❌ Stage 4 Aborted: No LLM provider reachable. Fill missing scenes "
+                         "by re-running this stage once your LLM is back.")
+            return
+
         from core.visual.planner import ScenePlanner
         from core.visual.prompter import PromptGenerator
         from core.visual.clip_builder import ClipBuilder
         from core.qa.scene_validator import SceneValidator
         from core.qa.coverage_validator import CoverageValidator
+        from core.qa.continuity_validator import ContinuityValidator
 
         translated_files = sorted(
             f for f in os.listdir(self.pm.dirs["output"])
@@ -366,6 +402,7 @@ class UnifiedPipeline:
         prompter = PromptGenerator(self.memory_db, config=self.config.config, llm_adapter=self.llm)
         scene_validator = SceneValidator(config=self.config.config)
         coverage_validator = CoverageValidator(threshold=0.85)
+        continuity_validator = ContinuityValidator(self.llm, importance_threshold=7)
         
         words_per_chunk = self.config.get("storyboard.words_per_chunk", 500)
         scenes_per_clip = self.config.get("storyboard.scenes_per_clip", 67)
@@ -389,6 +426,10 @@ class UnifiedPipeline:
                 chunk_key = f"{filename}_{i}"
                 if self.pm.is_complete("visual_planning_chunk", sub_key=chunk_key):
                     continue  # this specific chunk already succeeded in a previous run
+                    
+                # Retrieve ground truth events for this specific chunk
+                mem_sub_key = f"mem_{filename}_{i}"
+                chunk_events = self.memory_db.get_events_by_chunk(mem_sub_key)
 
                 # Detect chapter for this chunk
                 head = chunk_text[:300]
@@ -419,30 +460,38 @@ class UnifiedPipeline:
                 best_scenes = None
                 best_is_mock = True
                 best_coverage_ok = False
+                best_continuity_ok = False
                 attempts = 3  # was 2 — a flat 2s gap rarely outlasts a Groq 429 window
                 for attempt in range(attempts):
+                    # If the adapter itself has no providers, retrying is a waste of time
+                    if not getattr(self.llm, "is_available", True):
+                        break
+
                     self.llm.last_call_was_fallback = False
-                    scenes = planner.plan_scenes(chunk_text, chapter=chunk_chapter)
+                    scenes = planner.plan_scenes(chunk_text, chapter=chunk_chapter, events=chunk_events)
                     is_mock = any(s.get("_mock_fallback") for s in scenes) or \
                               getattr(self.llm, "last_call_was_fallback", False)
                     scenes = scene_validator.validate_scenes(scenes)
                     coverage_ok = coverage_validator.validate(chunk_text, scenes)
+                    continuity_ok = continuity_validator.validate(scenes, chunk_events)
 
                     is_better = (
                         best_scenes is None
                         or (best_is_mock and not is_mock)
-                        or (not is_mock and not best_is_mock and coverage_ok and not best_coverage_ok)
+                        or (not is_mock and not best_is_mock and coverage_ok and continuity_ok and not (best_coverage_ok and best_continuity_ok))
                     )
                     if is_better:
-                        best_scenes, best_is_mock, best_coverage_ok = scenes, is_mock, coverage_ok
+                        best_scenes, best_is_mock, best_coverage_ok, best_continuity_ok = scenes, is_mock, coverage_ok, continuity_ok
 
-                    if coverage_ok and not is_mock:
+                    if coverage_ok and continuity_ok and not is_mock:
                         break
+                        
+                    fail_reason = 'MOCK fallback' if is_mock else ('low coverage' if not coverage_ok else 'continuity failure')
                     wait = 20 if is_mock else 2  # real backoff when providers are down,
                                                   # not just a token retry delay
                     logger.warning(
                         f"    Attempt {attempt+1}/{attempts} "
-                        f"({'MOCK fallback' if is_mock else 'low coverage'}), "
+                        f"({fail_reason}), "
                         f"retrying in {wait}s..."
                     )
                     if attempt < attempts - 1:

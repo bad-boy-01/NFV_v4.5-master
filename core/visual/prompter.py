@@ -215,6 +215,8 @@ class PromptGenerator:
             char_data = self.memory.get_character_by_name(char_name)
             if char_data:
                 dna = char_data.get("visual_dna", {})
+                current_state = char_data.get("current_state", {})
+                
                 # Filter out the subject/gender tag from DNA — we add it explicitly
                 # to avoid duplicates like "(1boy, 1boy, black hair...)"
                 GENDER_TAGS = {"1boy", "1girl", "1man", "1woman", "boy", "girl", "male", "female"}
@@ -223,6 +225,14 @@ class PromptGenerator:
                     if v and str(v).lower().strip() not in
                     {"", "none", "unknown", "not specified"} | GENDER_TAGS
                 ]
+                
+                # Inject dynamic state (outfit overrides, injuries)
+                state_tags = [
+                    str(v) for k, v in current_state.items()
+                    if v and str(v).lower().strip() not in {"", "none", "unknown", "normal"} and k != "emotion"
+                ]
+                dna_tags.extend(state_tags)
+                
                 dna_str = ", ".join(dna_tags)
                 # Detect gender from full DNA dict values (including filtered ones)
                 all_dna_vals = " ".join(str(v).lower() for v in dna.values())
@@ -230,10 +240,18 @@ class PromptGenerator:
                           if any(w in all_dna_vals for w in ["girl", "woman", "female", "she"])
                           else "1boy")
                 char_parts.append(f"({gender}, {dna_str})" if dna_str else gender)
-                ref = self._find_reference(char_data["id"], emotion)
+                
+                # Use dynamic emotion if static parameter is neutral
+                scene_emotion = emotion
+                if scene_emotion == "neutral" and current_state.get("emotion"):
+                    scene_emotion = str(current_state.get("emotion")).lower()
+                    
+                ref = self._find_reference(char_data["id"], scene_emotion)
                 if ref:
                     ref_images.append(ref)
-                char_cache_data.append((char_data["id"], json.dumps(dna, sort_keys=True)))
+                
+                # Cache key must include state changes
+                char_cache_data.append((char_data["id"], json.dumps(dna, sort_keys=True), json.dumps(current_state, sort_keys=True)))
             else:
                 char_parts.append("1boy")
 

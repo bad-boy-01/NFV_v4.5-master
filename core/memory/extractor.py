@@ -29,21 +29,26 @@ class MemoryExtractor:
 
         system = (
             "You are a visual character extractor for a Korean manhwa AI pipeline. "
-            "Extract ALL named entities from the following text. "
+            "Extract ALL named entities AND narrative events from the following text. "
             f"Known characters already in the database: [{known}]. "
-            "For new characters, extract visual DNA as booru-style tags. "
-            "For existing characters, only add NEW visual details. "
+            "For new characters, extract static visual DNA as booru-style tags. "
+            "For ALL characters (new and existing), extract their CURRENT dynamic state (outfit, injuries, emotion). "
             "Output ONLY valid JSON with this structure:\n"
             '{"characters": [{"canonical_name": "Name", "visual_dna": {'
             '"subject": "1boy or 1girl", "hair": "black short hair", '
             '"eyes": "sharp brown eyes", "build": "athletic", '
-            '"clothing": "white martial arts robe", "accessories": ""}}], '
+            '"clothing": "white martial arts robe", "accessories": ""}, '
+            '"current_state": {"outfit": "torn white robe", "injuries": "bleeding cheek", "emotion": "angry"}}], '
             '"locations": [{"canonical_name": "Name", "description": "brief", '
             '"visual_tags": "stone courtyard, ancient pillars, morning mist"}], '
+            '"events": [{"summary": "Brief description of the action", '
+            '"importance": 8, "involved_characters": ["Name1", "Name2"], '
+            '"location": "Name"}], '
             '"world_concepts": [{"concept_type": "power_system", "name": "Qi Cultivation", '
             '"description": "cultivators absorb spiritual energy"}], '
             '"relationships": [{"char1": "Name1", "char2": "Name2", "type": "rivals", '
             '"description": "brief context"}]} '
+            "Note: 'importance' is a 1-10 scale where 10 is a major battle or plot twist. "
             "Return empty arrays if nothing found. NO extra text outside the JSON."
         )
         result = self._gen_json(text[:3000], system)

@@ -28,6 +28,7 @@ try:
         id = Column(String, primary_key=True)
         canonical_name = Column(String, nullable=False, unique=True)
         visual_dna = Column(JSON, default=dict)
+        current_state = Column(JSON, default=dict)
 
     class Location(Base):
         __tablename__ = "locations"
@@ -52,6 +53,15 @@ try:
         name = Column(String)
         description = Column(Text, default="")
 
+    class Event(Base):
+        __tablename__ = "events"
+        id = Column(Integer, primary_key=True, autoincrement=True)
+        summary = Column(Text, nullable=False)
+        importance = Column(Integer, default=5)
+        involved_characters = Column(Text, default="")
+        location = Column(String, default="")
+        source_chunk = Column(String, default="")
+
     SQLALCHEMY_AVAILABLE = True
 
 except ImportError:
@@ -75,6 +85,7 @@ class MemoryEngine:
             self._locs: Dict[str, dict] = {}
             self._rels: List[dict] = []
             self._concepts: List[dict] = []
+            self._events: List[dict] = []
             return
 
         db_path = os.path.join(mem_dir, "novel_memory.db")
@@ -97,23 +108,71 @@ class MemoryEngine:
         finally:
             s.close()
 
+    # ── Events ───────────────────────────────────────────────────────────────
+    def add_event(self, summary: str, importance: int = 5, involved_characters: str = "",
+                  location: str = "", source_chunk: str = ""):
+        if self._in_memory:
+            self._events.append({
+                "summary": summary, "importance": importance,
+                "involved_characters": involved_characters, "location": location,
+                "source_chunk": source_chunk
+            })
+            return
+
+        with self.Session() as s:
+            s.add(Event(summary=summary, importance=importance,
+                        involved_characters=involved_characters, location=location,
+                        source_chunk=source_chunk))
+
+    def get_events_by_chunk(self, source_chunk: str) -> List[Dict]:
+        if self._in_memory:
+            return [e for e in self._events if e.get("source_chunk") == source_chunk]
+
+        with self.Session() as s:
+            events = s.query(Event).filter_by(source_chunk=source_chunk).all()
+            return [{"summary": e.summary, "importance": e.importance,
+                     "involved_characters": e.involved_characters,
+                     "location": e.location, "source_chunk": e.source_chunk}
+                    for e in events]
+
+    def get_all_events(self) -> List[Dict]:
+        if self._in_memory:
+            return self._events
+
+        with self.Session() as s:
+            return [{"summary": e.summary, "importance": e.importance,
+                     "involved_characters": e.involved_characters,
+                     "location": e.location, "source_chunk": e.source_chunk}
+                    for e in s.query(Event).all()]
+
     # ── Characters ───────────────────────────────────────────────────────────
-    def add_character(self, char_id: str, name: str, visual_dna: dict):
+    def add_character(self, char_id: str, name: str, visual_dna: dict, current_state: dict = None):
+        if current_state is None:
+            current_state = {}
+            
         if self._in_memory:
             if name in self._chars:
                 self._chars[name]["visual_dna"].update(visual_dna)
+                self._chars[name]["current_state"].update(current_state)
             else:
                 self._chars[name] = {"id": char_id, "canonical_name": name,
-                                     "visual_dna": visual_dna}
+                                     "visual_dna": visual_dna, "current_state": current_state}
             return
 
         with self.Session() as s:
             existing = s.query(Character).filter_by(canonical_name=name).first()
             if existing:
-                merged = {**existing.visual_dna, **visual_dna}
-                existing.visual_dna = merged
+                merged_dna = {**existing.visual_dna, **visual_dna}
+                existing.visual_dna = merged_dna
+                
+                # Dynamic state overrides rather than purely merging, but we merge here for safety
+                if existing.current_state:
+                    merged_state = {**existing.current_state, **current_state}
+                else:
+                    merged_state = current_state
+                existing.current_state = merged_state
             else:
-                s.add(Character(id=char_id, canonical_name=name, visual_dna=visual_dna))
+                s.add(Character(id=char_id, canonical_name=name, visual_dna=visual_dna, current_state=current_state))
 
     def get_character_by_name(self, name: str) -> Optional[Dict]:
         if self._in_memory:
@@ -123,7 +182,7 @@ class MemoryEngine:
             c = s.query(Character).filter_by(canonical_name=name).first()
             if c:
                 return {"id": c.id, "canonical_name": c.canonical_name,
-                        "visual_dna": c.visual_dna}
+                        "visual_dna": c.visual_dna, "current_state": c.current_state}
         return None
 
     def get_all_characters(self) -> List[Dict]:
@@ -132,7 +191,7 @@ class MemoryEngine:
 
         with self.Session() as s:
             return [{"id": c.id, "canonical_name": c.canonical_name,
-                     "visual_dna": c.visual_dna}
+                     "visual_dna": c.visual_dna, "current_state": c.current_state}
                     for c in s.query(Character).all()]
 
     # ── Locations ─────────────────────────────────────────────────────────────
@@ -241,4 +300,5 @@ class MemoryEngine:
             "characters": self.get_all_characters(),
             "locations": self.get_all_locations(),
             "relationships": self.get_all_relationships(),
+            "events": self.get_all_events(),
         }

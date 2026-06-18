@@ -4,7 +4,7 @@ import logging
 import shutil
 import sys
 import time
-from unittest.mock import patch
+from unittest.mock import patch, PropertyMock
 
 # Suppress verbose logs to keep output clean
 logging.getLogger("core").setLevel(logging.WARNING)
@@ -29,7 +29,7 @@ from core.visual.planner import ScenePlanner
 # to test. This patches ScenePlanner.plan_scenes directly — one level above
 # the LLM call — so no network access is needed and the fake output is
 # never mistaken for fallback content (no `_mock_fallback` key).
-def _fake_plan_scenes(self, text_chunk, chapter=1):
+def _fake_plan_scenes(self, text_chunk, chapter=1, events=None):
     return [
         {
             "scene_id": "SC001",
@@ -81,7 +81,7 @@ def reset_project(num_files=2):
 def test_1():
     print("\n=== TEST 1: Crash after clips.json save, before checkpoint ===")
     reset_project()
-    with _plan_scenes_patch:
+    with _plan_scenes_patch, patch("models.llm_adapter.SmartLLMAdapter.is_available", new_callable=PropertyMock, return_value=True):
         pipeline = UnifiedPipeline(PROJ_NAME)
 
         original_save_checkpoint = pipeline.pm.save_checkpoint
@@ -128,7 +128,7 @@ def test_1():
 def test_2():
     print("\n=== TEST 2: Crash during second file processing ===")
     reset_project()
-    with _plan_scenes_patch:
+    with _plan_scenes_patch, patch("models.llm_adapter.SmartLLMAdapter.is_available", new_callable=PropertyMock, return_value=True):
         pipeline = UnifiedPipeline(PROJ_NAME)
 
         original_chunk_text = sys.modules['core.orchestrator']._chunk_text
@@ -230,7 +230,7 @@ def test_5():
     pipeline = UnifiedPipeline(PROJ_NAME)
 
     t0 = time.time()
-    with _plan_scenes_patch:
+    with _plan_scenes_patch, patch("models.llm_adapter.SmartLLMAdapter.is_available", new_callable=PropertyMock, return_value=True):
         pipeline.stage_visual_planning()
     t1 = time.time()
     

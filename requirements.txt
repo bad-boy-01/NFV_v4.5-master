@@ -26,11 +26,14 @@ edge-tts>=6.1.9
 coqui-tts
 
 # Video Assembly 
-moviepy==1.0.3
-# Note: decorator<5.0.0 is strictly required by moviepy 1.0.3.
-# This will trigger a conflict with Kaggle's 'mne' package (which we don't use).
-decorator==4.4.2
+moviepy>=2.1.1
 ffmpeg-python
+
+# Identity Preservation (PuLID)
+insightface
+facexlib
+onnxruntime-gpu
+filterpy
 
 # Database
 SQLAlchemy>=2.0.0
@@ -41,3 +44,4 @@ sentence-transformers
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+huggingface_hub

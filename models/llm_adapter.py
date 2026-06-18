@@ -282,6 +282,11 @@ class SmartLLMAdapter:
     def is_cloud(self) -> bool:
         return getattr(self._primary, "is_cloud", False)
 
+    @property
+    def is_available(self) -> bool:
+        """Returns True if at least one real LLM provider is reachable."""
+        return self._primary is not None
+
     def _handle_exhausted(self, system_prompt: str, prompt: str) -> str:
         """
         Called only when every real provider has failed for this request.
