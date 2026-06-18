@@ -321,8 +321,6 @@ class UnifiedPipeline:
 
         chars_dir = os.path.join(self.pm.dirs["memory"], "characters")
         os.makedirs(chars_dir, exist_ok=True)
-        poses = self.config.get("character_sheet.poses",
-                                ["front", "smile", "angry", "crying", "fight", "sit"])
         characters = self.memory_db.get_all_characters()
 
         if not characters:
@@ -337,12 +335,9 @@ class UnifiedPipeline:
                         if v and str(v).lower() not in {"none", "unknown", "not specified"}]
             dna_str = ", ".join(dna_tags)
 
-            pose_dir = os.path.join(chars_dir, char_id)
-            all_done = all(
-                os.path.exists(os.path.join(pose_dir, f"{p}.png")) for p in poses
-            )
-            if all_done:
-                logger.info(f"  Sheets exist: {char_name} — skipping")
+            out_path = os.path.join(chars_dir, f"{char_id}.png")
+            if os.path.exists(out_path):
+                logger.info(f"  Sheet exists: {char_name} — skipping")
                 continue
 
             logger.info(f"  Generating character sheet: {char_name}")
@@ -351,7 +346,6 @@ class UnifiedPipeline:
                 char_name=char_name,
                 dna_str=dna_str,
                 output_dir=chars_dir,
-                poses=poses,
             )
 
         logger.info("✅ Character sheets complete")

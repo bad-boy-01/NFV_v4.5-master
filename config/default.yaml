@@ -81,11 +81,8 @@ character_sheet:
   enabled: true
   poses:
     - "front"
-    - "smile"
-    - "angry"
-    - "crying"
-    - "fight"
-    - "sit"
+    # Additional poses (smile, angry, crying, fight, sit) can be enabled
+    # but generate 1 image per character saves massive GPU time on Kaggle.
 
 # ─── Prompts — Manhwa Style ──────────────────────────────────
 prompts:

@@ -21,16 +21,6 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# 6 emotional poses for character reference sheets
-POSE_PROMPTS = {
-    "front":  "character design sheet, concept art, turnaround, multiple views, front view, side view, back view, close-up portrait, simple background",
-    "smile":  "upper body, smiling happily, slight head tilt, warm expression",
-    "angry":  "upper body, angry expression, furrowed brows, clenched fists, intense glare",
-    "crying": "upper body, crying, tears streaming, sad expression, downcast eyes",
-    "fight":  "full body, combat stance, dynamic pose, raised fist, battle ready, fierce expression",
-    "sit":    "full body, sitting cross-legged, calm expression, eyes closed, meditative",
-}
-
 # Animagine-XL quality prefix — these MUST come first for best results
 ANIMAGINE_QUALITY = "score_9, score_8_up, (masterpiece:1.2), (best quality:1.1), highres"
 
@@ -507,15 +497,15 @@ class LocalImageAdapter:
         poses: list = None,
     ):
         """
-        Generates 6 reference poses for a character.
-        Creates: output_dir/{char_id}/{pose}.png
-        These are used by IP-Adapter for consistency across all scenes.
+        Generates 1 primary reference model sheet for a character.
+        Creates: output_dir/{char_id}.png
+        These are used by IP-Adapter/PuLID for consistency across all scenes.
         """
-        if poses is None:
-            poses = list(POSE_PROMPTS.keys())
-
-        pose_dir = os.path.join(output_dir, char_id)
-        os.makedirs(pose_dir, exist_ok=True)
+        out_path = os.path.join(output_dir, f"{char_id}.png")
+        
+        if os.path.exists(out_path):
+            logger.info(f"  Reference exists: {char_name} — skipping")
+            return
 
         seed_base = abs(hash(char_id + char_name)) % (2**31 - 1)
 
@@ -525,32 +515,26 @@ class LocalImageAdapter:
                       if any(w in dna_lower for w in ["girl", "woman", "female", "she"])
                       else "1boy")
 
-        for i, pose in enumerate(poses):
-            out_path = os.path.join(pose_dir, f"{pose}.png")
-            if os.path.exists(out_path):
-                logger.info(f"  Pose exists: {char_name}/{pose} — skipping")
-                continue
+        prompt = (
+            f"{ANIMAGINE_QUALITY}, "
+            f"{gender_tag}, {dna_str}, "
+            f"character design sheet, concept art, turnaround, multiple views, "
+            f"front view, side view, back view, close-up portrait, simple background, "
+            f"manhwa, webtoon, korean manhwa style, sharp lineart"
+        )
+        neg = (
+            f"score_6, score_5, (worst quality, low quality:1.4), "
+            f"bad anatomy, blurry, text, watermark, {negative_prompt}"
+        )
+        
+        logger.info(f"  Generating {char_name} reference sheet…")
 
-            pose_tags = POSE_PROMPTS[pose]
-            prompt = (
-                f"{ANIMAGINE_QUALITY}, "
-                f"{gender_tag}, {dna_str}, {pose_tags}, "
-                f"character reference sheet, "
-                f"manhwa, webtoon, korean manhwa style, sharp lineart"
-            )
-            neg = (
-                f"score_6, score_5, (worst quality, low quality:1.4), "
-                f"bad anatomy, blurry, text, watermark, {negative_prompt}"
-            )
-            pose_seed = (seed_base + i * 1013) % (2**31 - 1)
-            logger.info(f"  Generating {char_name}/{pose}…")
-
-            # Wider format for character sheets (fits multiple views)
-            self.generate_image(
-                prompt, out_path, negative_prompt=neg,
-                seed=pose_seed,
-                generation_params={"width": 1024, "height": 768, "steps": 25, "cfg": 7.0},
-            )
+        # Wider format for character sheets (fits multiple views)
+        self.generate_image(
+            prompt, out_path, negative_prompt=neg,
+            seed=seed_base,
+            generation_params={"width": 1024, "height": 768, "steps": 25, "cfg": 7.0},
+        )
 
     # ── Quality Filter ────────────────────────────────────────────────────────
     def _passes_quality(self, output_path: str) -> bool:

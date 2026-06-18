@@ -130,3 +130,26 @@ v4.5 uses `ip-adapter-plus-face_sdxl_vit-h.bin` at scale `0.65` for optimal iden
 - The pipeline automatically splits into `clip01.mp4`, `clip02.mp4`, etc.
 - Run across multiple sessions; at the end `stage_video` stitches everything with FFmpeg
 - No quality loss — FFmpeg stream-copies (no re-encode)
+
+Current run commands - 
+!git clone https://github.com/bad-boy-01/NFV_v4.5-master.git
+!cd NFV_v4.5-master && bash kaggle_setup.sh
+import subprocess
+import time
+import os
+print("Starting Ollama server...")
+# Start Ollama in the background properly
+process = subprocess.Popen(
+["ollama", "serve"],
+stdout=subprocess.DEVNULL,
+stderr=subprocess.DEVNULL
+)
+
+# Give it 5 seconds to boot up
+time.sleep(5)
+print("Pulling qwen2.5:7b model (this may take a minute if not cached)...")
+# Run the pull command synchronously so we wait for it to finish
+os.system("ollama pull qwen2.5:7b")
+print("Ollama is ready!")
+%cd NFV_v4.5-master
+!python main.py novel --input projects/novel/input/chapter1.txt
