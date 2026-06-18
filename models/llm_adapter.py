@@ -322,17 +322,8 @@ class SmartLLMAdapter:
         )
 
         if "ERROR:" in result:
-            logger.warning(f"Primary LLM failed ({result}). Trying fallback...")
-            # If Groq failed, try Ollama
-            if self._primary == self._groq and self._ollama.check_health():
-                result = self._ollama.generate(
-                    prompt, system_prompt=system_prompt,
-                    temperature=temperature, model=model, **kwargs
-                )
-
-            # If Ollama also fails or was the primary, exhaust to mock/strict
-            if "ERROR:" in result:
-                return self._handle_exhausted(system_prompt or "", prompt)
+            logger.warning(f"Primary LLM failed ({result}). Skipping fallback and exhausting...")
+            return self._handle_exhausted(system_prompt or "", prompt)
 
         return result
 
@@ -351,15 +342,8 @@ class SmartLLMAdapter:
         )
 
         if "ERROR:" in result:
-            logger.warning(f"Primary LLM JSON failed ({result}). Trying fallback...")
-            if self._primary == self._groq and self._ollama.check_health():
-                result = self._ollama.generate_json(
-                    prompt, system_prompt=system_prompt,
-                    temperature=temperature, model=model, **kwargs
-                )
-
-            if "ERROR:" in result:
-                return self._handle_exhausted(system_prompt or "", prompt)
+            logger.warning(f"Primary LLM JSON failed ({result}). Skipping fallback and exhausting...")
+            return self._handle_exhausted(system_prompt or "", prompt)
 
         return result
 

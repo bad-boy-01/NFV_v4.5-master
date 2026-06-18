@@ -35,8 +35,8 @@ class MemoryExtractor:
             "For ALL characters (new and existing), extract their CURRENT dynamic state (outfit, injuries, emotion). "
             "Output ONLY valid JSON with this structure:\n"
             '{"characters": [{"canonical_name": "Name", "visual_dna": {'
-            '"subject": "1boy or 1girl", "hair": "black short hair", '
-            '"eyes": "sharp brown eyes", "build": "athletic", '
+            '"subject": "1boy or 1girl", "age": "e.g. 20 years old, teenager, ancient", '
+            '"hair": "black short hair", "eyes": "sharp brown eyes", "build": "athletic", '
             '"clothing": "white martial arts robe", "accessories": ""}, '
             '"current_state": {"outfit": "torn white robe", "injuries": "bleeding cheek", "emotion": "angry"}}], '
             '"locations": [{"canonical_name": "Name", "description": "brief", '
