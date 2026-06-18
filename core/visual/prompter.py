@@ -142,7 +142,6 @@ class PromptGenerator:
             if os.path.exists(style_path):
                 with open(style_path, encoding="utf-8") as f:
                     self.world_style = f.read().strip()
-                logger.info(f"World style: {self.world_style[:80]}…")
 
         prompts_cfg = self.config.get("prompts", {})
         self.style_positive = prompts_cfg.get("style_positive", MANHWA_STYLE) or MANHWA_STYLE

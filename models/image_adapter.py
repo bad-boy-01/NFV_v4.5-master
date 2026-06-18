@@ -225,6 +225,8 @@ class LocalImageAdapter:
             from compel import Compel, ReturnedEmbeddingsType
             import torch
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            # SDXL configuration for Compel
             self._compel = Compel(
                 tokenizer=[self.pipeline.tokenizer, self.pipeline.tokenizer_2],
                 text_encoder=[self.pipeline.text_encoder, self.pipeline.text_encoder_2],
@@ -236,9 +238,7 @@ class LocalImageAdapter:
             logger.info("Compel long-prompt encoder loaded ✓ (prompts >77 tokens are chunked, not truncated)")
         except Exception as e:
             logger.warning(
-                f"Compel unavailable ({e}) — falling back to plain prompt strings "
-                f"(prompter.py's token-budget trimming is the only guard against "
-                f"77-token truncation in this mode)"
+                f"Compel unavailable ({e}) — falling back to plain prompt strings"
             )
             self._compel = False  # sentinel: tried once, don't retry every call
 
@@ -385,23 +385,38 @@ class LocalImageAdapter:
 
         if self._compel:
             try:
-                conditioning, pooled = self._compel(prompt)
-                neg_conditioning, neg_pooled = self._compel(negative_prompt or MASTER_NEGATIVE)
+                # 1. Get embeddings
+                prompt_embeds, pooled_prompt_embeds = self._compel(prompt)
+                negative_prompt_embeds, negative_pooled_prompt_embeds = self._compel(negative_prompt or MASTER_NEGATIVE)
                 
-                # Manual padding instead of relying on Compel's broken method for SDXL
-                if conditioning.shape[1] > neg_conditioning.shape[1]:
-                    pad_len = conditioning.shape[1] - neg_conditioning.shape[1]
-                    # Pad the middle dimension (sequence length)
-                    neg_conditioning = torch.nn.functional.pad(neg_conditioning, (0, 0, 0, pad_len))
-                elif neg_conditioning.shape[1] > conditioning.shape[1]:
-                    pad_len = neg_conditioning.shape[1] - conditioning.shape[1]
-                    conditioning = torch.nn.functional.pad(conditioning, (0, 0, 0, pad_len))
+                # 2. Manual padding for long prompts (>77 tokens)
+                # SDXL Embeddings are [batch, seq_len, hidden_dim]
+                # hidden_dim is 2048 for SDXL (768 + 1280)
+                seq_len = prompt_embeds.shape[1]
+                neg_seq_len = negative_prompt_embeds.shape[1]
+                
+                if seq_len > neg_seq_len:
+                    # Pad negative prompt sequence length to match positive
+                    padding = torch.zeros(
+                        (1, seq_len - neg_seq_len, negative_prompt_embeds.shape[2]),
+                        device=negative_prompt_embeds.device,
+                        dtype=negative_prompt_embeds.dtype
+                    )
+                    negative_prompt_embeds = torch.cat([negative_prompt_embeds, padding], dim=1)
+                elif neg_seq_len > seq_len:
+                    # Pad positive prompt sequence length to match negative
+                    padding = torch.zeros(
+                        (1, neg_seq_len - seq_len, prompt_embeds.shape[2]),
+                        device=prompt_embeds.device,
+                        dtype=prompt_embeds.dtype
+                    )
+                    prompt_embeds = torch.cat([prompt_embeds, padding], dim=1)
 
                 kwargs = {
-                    "prompt_embeds": conditioning,
-                    "pooled_prompt_embeds": pooled,
-                    "negative_prompt_embeds": neg_conditioning,
-                    "negative_pooled_prompt_embeds": neg_pooled,
+                    "prompt_embeds": prompt_embeds,
+                    "pooled_prompt_embeds": pooled_prompt_embeds,
+                    "negative_prompt_embeds": negative_prompt_embeds,
+                    "negative_pooled_prompt_embeds": negative_pooled_prompt_embeds,
                     "width": w,
                     "height": h,
                     "num_inference_steps": steps,

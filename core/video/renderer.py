@@ -103,7 +103,7 @@ class VideoRenderer:
         srt_index = 1
         
         try:
-            from moviepy.editor import AudioFileClip
+            from moviepy import AudioFileClip
             with open(srt_path, "w", encoding="utf-8") as f:
                 for clip in clips_data:
                     for shot in clip.get("shots", []):
