@@ -65,13 +65,11 @@ _CAMERA_TAGS = {
     "dutch angle": "dutch angle, tilted camera, dynamic tension",
 }
 
-# Safety margin under CLIP's hard 77-token-per-encoder cap. This is a
-# defense-in-depth measure: image_adapter.py now encodes prompts with
-# Compel so long prompts are chunked rather than truncated, but this budget
-# keeps the *positive* style/character tags always within the first 77
-# tokens too, in case Compel isn't available in a given environment and
-# the pipeline falls back to plain string prompts.
-PROMPT_TOKEN_BUDGET = 70
+# Safety margin under CLIP's hard 77-token-per-encoder cap.
+# With Compel active, this is now a "soft" target to prevent prompts from 
+# getting TOO long and slowing down generation, but we can safely go 
+# much higher than 77.
+PROMPT_TOKEN_BUDGET = 220
 
 
 def _tag_list(text: str) -> List[str]:

@@ -32,9 +32,12 @@ class ScenePlanner:
 
         system = (
             "You are a Korean manhwa storyboard showrunner. "
-            "Break the following story text into visual SCENES. "
-            "Each scene = one image panel. A new scene starts when location, "
-            "time, or main focus changes.\n\n"
+            "Break the following story text into visual SCENES.\n\n"
+            "CRITICAL RULES:\n"
+            "- DO NOT SUMMARIZE. Include EVERY single detail from the text.\n"
+            "- Break this chunk into AT LEAST 6-8 SCENES. Each scene = one image panel.\n"
+            "- The 'narration_text' for all scenes COMBINED must contain 100% of the provided text.\n"
+            "- A new scene starts when location, time, or main focus changes.\n\n"
             "For each scene output a JSON object with:\n"
             '  "scene_id": "SC001" (sequential),\n'
             '  "location": "place name",\n'
@@ -44,12 +47,10 @@ class ScenePlanner:
             '  "camera_angle": "close-up|medium shot|wide shot|aerial|low angle",\n'
             '  "lighting": "cinematic lighting description",\n'
             '  "visual_prompt_tags": "comma-separated booru tags — NO character names, use 1boy/1girl",\n'
-            '  "narration_text": "exact dialogue or narration from the text for TTS",\n'
+            '  "narration_text": "EXACT sentences from the text for TTS (DO NOT SKIP ANY SENTENCES)",\n'
             '  "complexity": 1-10\n\n'
-            "RULES:\n"
+            "FORMAT RULES:\n"
             "- DO NOT include character names in visual_prompt_tags (use 1boy/1girl instead)\n"
-            "- narration_text must come from the actual text, not invented\n"
-            "- Aim for 1 scene per 3-5 sentences\n"
             "- Output ONLY a JSON array. NO extra text outside the array."
             f"{events_context}"
         )
