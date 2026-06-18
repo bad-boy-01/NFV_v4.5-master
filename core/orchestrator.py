@@ -249,10 +249,13 @@ class UnifiedPipeline:
                                                  c.get("visual_dna", {}),
                                                  c.get("current_state", {}))
                 for loc in data.get("locations", []):
+                    v_tags = loc.get("visual_tags", "")
+                    if isinstance(v_tags, list):
+                        v_tags = ", ".join(v_tags)
                     self.memory_db.add_location(
                         loc.get("canonical_name", "Unknown"),
                         loc.get("description", ""),
-                        loc.get("visual_tags", ""),
+                        v_tags,
                     )
                 for concept in data.get("world_concepts", []):
                     self.memory_db.add_world_concept(
