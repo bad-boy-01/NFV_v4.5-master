@@ -397,9 +397,16 @@ class LocalImageAdapter:
             try:
                 conditioning, pooled = self._compel(prompt)
                 neg_conditioning, neg_pooled = self._compel(negative_prompt or MASTER_NEGATIVE)
-                [conditioning, neg_conditioning] = self._compel.pad_conditioning_tensors_to_same_length(
-                    [conditioning, neg_conditioning]
-                )
+                
+                # Manual padding instead of relying on Compel's broken method for SDXL
+                if conditioning.shape[1] > neg_conditioning.shape[1]:
+                    pad_len = conditioning.shape[1] - neg_conditioning.shape[1]
+                    # Pad the middle dimension (sequence length)
+                    neg_conditioning = torch.nn.functional.pad(neg_conditioning, (0, 0, 0, pad_len))
+                elif neg_conditioning.shape[1] > conditioning.shape[1]:
+                    pad_len = neg_conditioning.shape[1] - conditioning.shape[1]
+                    conditioning = torch.nn.functional.pad(conditioning, (0, 0, 0, pad_len))
+
                 kwargs = {
                     "prompt_embeds": conditioning,
                     "pooled_prompt_embeds": pooled,
