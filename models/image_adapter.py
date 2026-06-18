@@ -494,6 +494,7 @@ class LocalImageAdapter:
         dna_str: str,
         output_dir: str,
         negative_prompt: str = "",
+        world_style: str = "",
         poses: list = None,
     ):
         """
@@ -515,9 +516,12 @@ class LocalImageAdapter:
                       if any(w in dna_lower for w in ["girl", "woman", "female", "she"])
                       else "1boy")
 
+        # Inject world context (genre/setting) to ensure outfits match the story universe
+        setting_context = f"wearing clothes fitting the setting: ({world_style}), " if world_style else ""
+
         prompt = (
             f"{ANIMAGINE_QUALITY}, "
-            f"{gender_tag}, {dna_str}, "
+            f"{gender_tag}, {dna_str}, {setting_context}"
             f"character design sheet, concept art, turnaround, multiple views, "
             f"front view, side view, back view, close-up portrait, simple background, "
             f"manhwa, webtoon, korean manhwa style, sharp lineart"

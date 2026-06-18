@@ -327,6 +327,12 @@ class UnifiedPipeline:
             logger.warning("  No characters in memory — skipping character sheets")
             return
 
+        world_style = ""
+        style_file = os.path.join(self.pm.dirs["memory"], "world_style.txt")
+        if os.path.exists(style_file):
+            with open(style_file, "r", encoding="utf-8") as f:
+                world_style = f.read().strip()
+
         for char in characters:
             char_id = char["id"]
             char_name = char["canonical_name"]
@@ -346,6 +352,7 @@ class UnifiedPipeline:
                 char_name=char_name,
                 dna_str=dna_str,
                 output_dir=chars_dir,
+                world_style=world_style,
             )
 
         logger.info("✅ Character sheets complete")
