@@ -32,26 +32,27 @@ class ScenePlanner:
 
         system = (
             "You are a Korean manhwa storyboard showrunner. "
-            "Break the following story text into visual SCENES.\n\n"
-            "CRITICAL RULES:\n"
-            "- DO NOT SUMMARIZE. Include EVERY single detail from the text.\n"
-            "- Break this chunk into AT LEAST 6-8 SCENES. Each scene = one image panel.\n"
-            "- The 'narration_text' for all scenes COMBINED must contain 100% of the provided text.\n"
-            "- A new scene starts when location, time, or main focus changes.\n\n"
+            "Your goal is to turn the provided text chunk into a detailed, scene-by-scene storyboard.\n\n"
+            "MANDATORY RULES:\n"
+            "1. NO SUMMARIZATION: You must include EVERY sentence from the text in the 'narration_text' fields.\n"
+            "2. HIGH SCENE DENSITY: Generate at least 15 scenes for this chunk. Every sentence or action must be a scene.\n"
+            "3. NO SKIPPING: If a sentence is not in a scene, you have failed.\n"
+            "4. A new scene starts for every action, dialogue, or change in camera angle.\n"
+            "5. The combined 'narration_text' of all scenes MUST equal the source text 100%.\n\n"
             "For each scene output a JSON object with:\n"
-            '  "scene_id": "SC001" (sequential),\n'
-            '  "location": "place name",\n'
+            '  "scene_id": "SCxxx" (sequential),\n'
+            '  "location": "current location",\n'
             '  "characters": ["Name1", "Name2"],\n'
             '  "emotion": "neutral|happy|angry|sad|fearful|fighting|focused|shocked",\n'
-            '  "action": "short action description",\n'
+            '  "action": "detailed description of character movements and scene environment",\n'
             '  "camera_angle": "close-up|medium shot|wide shot|aerial|low angle",\n'
             '  "lighting": "cinematic lighting description",\n'
-            '  "visual_prompt_tags": "comma-separated booru tags — NO character names, use 1boy/1girl",\n'
-            '  "narration_text": "EXACT sentences from the text for TTS (DO NOT SKIP ANY SENTENCES)",\n'
-            '  "complexity": 1-10\n\n'
+            '  "visual_prompt_tags": "comma-separated booru tags (e.g., 1boy, black hair, looking at viewer)",\n'
+            '  "narration_text": "THE EXACT SENTENCE FROM THE TEXT",\n'
+            '  "complexity": 5\n\n'
             "FORMAT RULES:\n"
-            "- DO NOT include character names in visual_prompt_tags (use 1boy/1girl instead)\n"
-            "- Output ONLY a JSON array. NO extra text outside the array."
+            "- Output ONLY a valid JSON array of objects [{},{}].\n"
+            "- NO extra text before or after the JSON."
             f"{events_context}"
         )
 
