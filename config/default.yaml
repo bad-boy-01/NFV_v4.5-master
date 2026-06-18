@@ -1,0 +1,124 @@
+# ════════════════════════════════════════════════════════════
+# Novel Video Factory v4 — Default Configuration
+# 100% FREE: No API keys, no paid models
+# ════════════════════════════════════════════════════════════
+
+project:
+  language:
+    source: "auto"     # "auto" = detect language, or set "Korean" / "Chinese" / "English"
+    target: "English"
+
+# ─── Models ──────────────────────────────────────────────────
+models:
+  llm:
+    # Primary: Ollama local (qwen2.5:7b) - recommended to avoid Groq rate limits
+    # Fallback: Groq free-tier (sign up FREE at console.groq.com)
+    provider: "ollama"           # "groq" | "ollama"
+    model: "llama-3.3-70b-versatile"   # Groq free model
+    planning_model: "llama-3.3-70b-versatile"
+    translation_model: "llama-3.3-70b-versatile"
+    ollama_host: "http://localhost:11434"
+    ollama_model: "qwen2.5:7b"   # Primary if provider is ollama
+
+  # ── Image Generation ──────────────────────────────────────
+  image:
+    # Animagine-XL 3.1: FREE on HuggingFace, best manhwa/webtoon model
+    provider: "sdxl"
+    model: "cagliostrolab/animagine-xl-3.1"
+    width: 832        # 16:9 fast — change to 1344 for higher quality (slower)
+    height: 480       # T4 GPU: 832×480 ≈ 6-8s/img | 1344×768 ≈ 25s/img
+    num_inference_steps: 20
+    guidance_scale: 7.0
+    use_fast_scheduler: true    # DPM++ 2M Karras (30% faster than DDIM)
+    use_ip_adapter: true        # Character consistency
+    # ip-adapter-plus-face is specifically tuned for facial identity —
+    # the plain ip-adapter_sdxl.bin (and the 0.35 scale this used to be set
+    # to) is tuned more for general style/composition transfer and was too
+    # weak to reliably keep a character's face/outfit consistent across
+    # independently-generated shots.
+    ip_adapter_weight_name: "ip-adapter-plus-face_sdxl_vit-h.bin"
+    ip_adapter_scale: 0.65
+
+  # ── Audio ─────────────────────────────────────────────────
+  audio:
+    provider: "edge_tts"        # FREE Microsoft Edge TTS
+    voice: "en-US-AndrewNeural" # Natural English male voice
+    # Other good voices: en-US-JennyNeural, en-GB-RyanNeural
+
+# ─── Hardware ─────────────────────────────────────────────────
+hardware:
+  device: "cuda"
+  precision: "fp16"
+
+# ─── Video ────────────────────────────────────────────────────
+video:
+  fps: 24
+  font: "DejaVu-Sans-Bold"      # Available on Kaggle/Linux, no ImageMagick policy issues
+  font_size: 40
+  crossfade_duration: 0.5
+  output_format: "mp4"
+  ken_burns_speed: 0.03         # Subtle zoom for cinematic feel
+
+# ─── Storyboard / Clip Architecture ──────────────────────────
+# Target: 10-minute clips → combine into 2-hour video
+# 67 scenes × ~9s/scene ≈ 10 minutes per clip
+storyboard:
+  scenes_per_clip: 67
+  words_per_chunk: 500          # Text chunk size for scene planning
+
+# ─── Quality Filter ──────────────────────────────────────────
+quality_filter:
+  enabled: true
+  max_retries: 3
+  min_file_size_kb: 10
+
+# ─── Character Sheets ────────────────────────────────────────
+character_sheet:
+  enabled: true
+  poses:
+    - "front"
+    - "smile"
+    - "angry"
+    - "crying"
+    - "fight"
+    - "sit"
+
+# ─── Prompts — Manhwa Style ──────────────────────────────────
+prompts:
+  # NOTE: do NOT repeat score_9/score_8_up/masterpiece/best-quality tags
+  # here — ANIMAGINE_QUALITY already adds those at the very front of every
+  # prompt. Duplicating them here used to waste ~15 of the 77-token CLIP
+  # budget on repeats before a single style or character tag was added,
+  # which combined with this block being appended *last* in the prompt
+  # meant the actual "korean manhwa style" tags below were usually the
+  # first thing silently truncated. (prompter.py also dedupes defensively
+  # now regardless of what's configured here, but keep this list clean.)
+  style_positive: >
+    manhwa, webtoon, korean manhwa style, (sharp lineart:1.2),
+    (vibrant colors:1.1), cinematic lighting, dramatic lighting,
+    detailed background, detailed clothing, expressive face
+  style_negative: >
+    score_6, score_5, score_4,
+    (worst quality, low quality:1.4), bad anatomy, bad hands,
+    text, error, missing fingers, extra digit, fewer digits,
+    cropped, jpeg artifacts, signature, watermark, username,
+    blurry, ugly, deformed, 3d render, photo, photorealistic,
+    western comic style, american comic, fat, obese, extra limbs,
+    retro, 90s anime, flat color, thick lines
+
+# ─── System ──────────────────────────────────────────────────
+system:
+  cache_enabled: true
+  # true = raise LLMFallbackExhausted when both Groq and Ollama fail for a
+  #   call (stops the pipeline loudly instead of inserting placeholder
+  #   content — recommended once you've confirmed your LLM setup works).
+  # false = use mock fallbacks, but skip merging them into real data and
+  #   report them clearly (see FALLBACK_SCENES_REPORT.json after Stage 4
+  #   and the "LLM FALLBACK #n" error logs). This is now actually wired up
+  #   — it previously had no effect regardless of its value.
+  strict_mode: false
+
+# ─── Google Drive (Optional) ─────────────────────────────────
+gdrive:
+  enabled: false
+  folder_id: ""                 # Paste your Google Drive folder ID here
