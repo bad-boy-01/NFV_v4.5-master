@@ -29,8 +29,8 @@ class VideoRenderer:
     """
     def __init__(self, project_dir: str, config: dict = None):
         self.project_dir = project_dir
-        cfg = config or {}
-        vid_cfg = cfg.get("video", {})
+        self.config = config or {}
+        vid_cfg = self.config.get("video", {})
         self.fps = vid_cfg.get("fps", 24)
         self.font = vid_cfg.get("font", "DejaVu-Sans-Bold")
         self.font_size = vid_cfg.get("font_size", 40)
@@ -143,7 +143,18 @@ class VideoRenderer:
         logger.info(f"--- Rendering: {clip_id} ({len(shots)} shots) ---")
 
         shot_clips = []
+        current_chapter = -1
+
         for shot in shots:
+            # Layer: Chapter Intro Cards
+            shot_chapter = shot.get("chapter", 1)
+            if shot_chapter != current_chapter:
+                # New chapter detected — insert a title card
+                intro = self._render_chapter_intro(shot_chapter)
+                if intro:
+                    shot_clips.append(intro)
+                current_chapter = shot_chapter
+
             sc = self._render_shot(shot, clip_id)
             if sc is not None:
                 shot_clips.append(sc)
@@ -223,35 +234,6 @@ class VideoRenderer:
                 motion_type = random.choice(["zoom_in", "zoom_out", "pan_right", "pan_left"])
                 speed = base_speed
 
-            # 2. Apply Motion Effect via MoviePy 2.x
-            # We scale the image slightly larger than the screen to allow room for panning
-            scale_factor = 1.0 + speed
-
-            def resize_effect(t):
-                if motion_type == "zoom_in":
-                    return 1 + (speed * t / duration)
-                elif motion_type == "zoom_out":
-                    return 1 + speed - (speed * t / duration)
-                else:
-                    return scale_factor # Fixed scale for panning
-
-            def position_effect(t):
-                # t goes from 0 to duration. Normalize to 0.0 -> 1.0
-                progress = t / duration
-                # Image is larger than screen by (scale_factor - 1). 
-                # To pan across the extra width:
-                offset_ratio = (scale_factor - 1) / scale_factor
-                
-                if motion_type == "pan_right":
-                    # Image moves left to reveal right side.
-                    x = "left" # MoviePy 2.x handles string alignment for moving images differently sometimes, 
-                               # but we'll use a relative coordinate system or rely on center if strings fail.
-                    # A safer approach for MoviePy 2 is a custom position function returning (x, y) pixels.
-                    # Since we don't have w/h easily here without evaluating the clip, we rely on standard "center"
-                    # for zooms. For pans, let's keep it safe: just use center if not panning.
-                    return ("center", "center") # Reverting to safe zoom-only for strict MoviePy 2 compatibility
-                return ("center", "center")
-
             # Safe MoviePy 2.x implementation (Focusing strictly on Zoom as it's perfectly stable)
             def safe_zoom_effect(t):
                 if motion_type in ["zoom_in", "tilt_up"]: # Map tilt to slow zoom to avoid edge clipping issues
@@ -276,6 +258,34 @@ class VideoRenderer:
 
         except Exception as e:
             logger.error(f"Failed to render shot {shot_id}: {e}")
+            return None
+
+    def _render_chapter_intro(self, chapter_num: int):
+        """Generate a cinematic black screen title card for a new chapter."""
+        try:
+            from moviepy import TextClip, CompositeVideoClip, ColorClip
+            
+            duration = 3.0
+            w, h = 832, 480 # Default
+            w = self.config.get("models", {}).get("image", {}).get("width", 832)
+            h = self.config.get("models", {}).get("image", {}).get("height", 480)
+
+            bg = ColorClip(size=(w, h), color=(0, 0, 0)).with_duration(duration)
+            
+            txt = TextClip(
+                text=f"CHAPTER {chapter_num}",
+                font=self.font,
+                font_size=self.font_size * 1.5,
+                color="white",
+                text_align="center",
+            ).with_duration(duration).with_position("center")
+            
+            # Fade in/out
+            intro = CompositeVideoClip([bg, txt]).with_fadein(0.5).with_fadeout(0.5)
+            logger.info(f"  Creating Intro Card: Chapter {chapter_num}")
+            return intro
+        except Exception as e:
+            logger.debug(f"Failed to render chapter intro: {e}")
             return None
 
     def _add_subtitles(self, img_clip, text: str, duration: float):

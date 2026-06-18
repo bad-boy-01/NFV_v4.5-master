@@ -386,44 +386,39 @@ class LocalImageAdapter:
         if self._compel:
             try:
                 # 1. Get embeddings
-                prompt_embeds, pooled_prompt_embeds = self._compel(prompt)
-                negative_prompt_embeds, negative_pooled_prompt_embeds = self._compel(negative_prompt or MASTER_NEGATIVE)
+                p_emb, p_pooled = self._compel(prompt)
+                n_emb, n_pooled = self._compel(negative_prompt or MASTER_NEGATIVE)
                 
-                # 2. Manual padding for long prompts (>77 tokens)
-                # SDXL Embeddings are [batch, seq_len, hidden_dim]
-                # hidden_dim is 2048 for SDXL (768 + 1280)
-                seq_len = prompt_embeds.shape[1]
-                neg_seq_len = negative_prompt_embeds.shape[1]
+                # 2. Manual padding for sequence length mismatch
+                # Compel for SDXL returns [1, Seq, 2048] for emb and [1, 1280] for pooled
+                seq_len = p_emb.shape[1]
+                neg_seq_len = n_emb.shape[1]
                 
                 if seq_len > neg_seq_len:
-                    # Pad negative prompt sequence length to match positive
                     padding = torch.zeros(
-                        (1, seq_len - neg_seq_len, negative_prompt_embeds.shape[2]),
-                        device=negative_prompt_embeds.device,
-                        dtype=negative_prompt_embeds.dtype
+                        (1, seq_len - neg_seq_len, n_emb.shape[2]),
+                        device=n_emb.device, dtype=n_emb.dtype
                     )
-                    negative_prompt_embeds = torch.cat([negative_prompt_embeds, padding], dim=1)
+                    n_emb = torch.cat([n_emb, padding], dim=1)
                 elif neg_seq_len > seq_len:
-                    # Pad positive prompt sequence length to match negative
                     padding = torch.zeros(
-                        (1, neg_seq_len - seq_len, prompt_embeds.shape[2]),
-                        device=prompt_embeds.device,
-                        dtype=prompt_embeds.dtype
+                        (1, neg_seq_len - seq_len, p_emb.shape[2]),
+                        device=p_emb.device, dtype=p_emb.dtype
                     )
-                    prompt_embeds = torch.cat([prompt_embeds, padding], dim=1)
+                    p_emb = torch.cat([p_emb, padding], dim=1)
 
                 kwargs = {
-                    "prompt_embeds": prompt_embeds,
-                    "pooled_prompt_embeds": pooled_prompt_embeds,
-                    "negative_prompt_embeds": negative_prompt_embeds,
-                    "negative_pooled_prompt_embeds": negative_pooled_prompt_embeds,
+                    "prompt_embeds": p_emb,
+                    "pooled_prompt_embeds": p_pooled,
+                    "negative_prompt_embeds": n_emb,
+                    "negative_pooled_prompt_embeds": n_pooled,
                     "width": w,
                     "height": h,
                     "num_inference_steps": steps,
                     "guidance_scale": cfg,
                 }
             except Exception as e:
-                logger.warning(f"  Compel encoding failed ({e}) — using plain prompt for this image")
+                logger.warning(f"  Compel encoding failed ({e}) — using plain prompt")
                 kwargs = None
 
         if kwargs is None:
@@ -475,18 +470,24 @@ class LocalImageAdapter:
                             import numpy as np
                             imgs = [Image.open(p).convert("RGB") for p in valid_refs]
                             if len(imgs) > 1:
-                                # Average multiple reference images for multi-character scenes
+                                # Average multiple reference images
                                 avg = np.mean(
                                     [np.array(img.resize((224, 224))) for img in imgs], axis=0
                                 ).astype("uint8")
-                                kwargs["ip_adapter_image"] = Image.fromarray(avg)
+                                ref_img = Image.fromarray(avg)
                             else:
-                                kwargs["ip_adapter_image"] = imgs[0]
+                                ref_img = imgs[0]
+                            
+                            # V3 Fix: Ensure IP-Adapter image is passed correctly
+                            # For SDXL, we often need to set the image directly in the pipeline call
+                            kwargs["ip_adapter_image"] = ref_img
                             logger.debug(f"  IP-Adapter applied: {len(valid_refs)} ref image(s)")
                         except Exception as e:
                             logger.warning(f"  IP-Adapter injection failed: {e}")
 
         try:
+            # FIX: If prompt_embeds are present, diffusers handles added_cond_kwargs automatically
+            # but if IP-Adapter is active, we must ensure ip_adapter_image is passed.
             image = self.pipeline(**kwargs).images[0]
             image.save(output_path)
             logger.info(f"  ✓ Saved: {os.path.basename(output_path)}")
