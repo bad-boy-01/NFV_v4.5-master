@@ -277,8 +277,9 @@ class SmartLLMAdapter:
         self._groq = GroqLLMAdapter(model_name=groq_model)
         self._deepseek = DeepSeekLLMAdapter(model_name=deepseek_model)
 
-        # Pick primary adapter based on provider setting
-        if provider == "deepseek" and self._deepseek.check_health():
+        # Pick primary adapter based on availability, preferring DeepSeek if key exists
+        if self._deepseek.check_health():
+            # Force DeepSeek if key is provided, as Groq's daily limits are too tight for novels
             self._primary = self._deepseek
             logger.info(f"LLM: Using DeepSeek ({deepseek_model}) as primary")
         elif self._groq.check_health():
