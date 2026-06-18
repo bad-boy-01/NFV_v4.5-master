@@ -469,20 +469,16 @@ class UnifiedPipeline:
                 
                 for attempt in range(3):
                     chunk_scenes = planner.plan_scenes(chunk_text, chunk_chapter, events=chunk_events)
-                    coverage = coverage_validator.check_coverage(chunk_text, chunk_scenes)
                     
-                    if coverage > best_coverage:
+                    # V5: CoverageValidator.validate() returns True if passes, False if fails
+                    is_covered = coverage_validator.validate(chunk_text, chunk_scenes)
+                    
+                    if is_covered:
                         best_scenes = chunk_scenes
-                        best_coverage = coverage
+                        break
                         
-                    if coverage >= 85.0:
-                        break
-                    
-                    # V5: Early exit if LLM is stuck and not improving
-                    if attempt > 0 and abs(coverage - best_coverage) < 1.0:
-                        logger.warning("  Coverage stable and low, skipping further retries.")
-                        break
-                    
+                    # Early exit is trickier now as we don't have the explicit ratio,
+                    # but we can rely on the validator to log the issue.
                     time.sleep(2)
                 
                 chunk_scenes = best_scenes
