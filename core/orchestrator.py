@@ -482,45 +482,15 @@ class UnifiedPipeline:
                     time.sleep(2)
                 
                 chunk_scenes = best_scenes
-                best_coverage_ok = False
-                best_continuity_ok = False
-                attempts = 3  # was 2 — a flat 2s gap rarely outlasts a Groq 429 window
-                for attempt in range(attempts):
-                    # If the adapter itself has no providers, retrying is a waste of time
-                    if not getattr(self.llm, "is_available", True):
-                        break
-
-                    self.llm.last_call_was_fallback = False
-                    scenes = planner.plan_scenes(chunk_text, chapter=chunk_chapter, events=chunk_events)
-                    is_mock = any(s.get("_mock_fallback") for s in scenes) or \
-                              getattr(self.llm, "last_call_was_fallback", False)
-                    scenes = scene_validator.validate_scenes(scenes)
-                    coverage_ok = coverage_validator.validate(chunk_text, scenes)
-                    continuity_ok = continuity_validator.validate(scenes, chunk_events)
-
-                    is_better = (
-                        best_scenes is None
-                        or (best_is_mock and not is_mock)
-                        or (not is_mock and not best_is_mock and coverage_ok and continuity_ok and not (best_coverage_ok and best_continuity_ok))
-                    )
-                    if is_better:
-                        best_scenes, best_is_mock, best_coverage_ok, best_continuity_ok = scenes, is_mock, coverage_ok, continuity_ok
-
-                    if coverage_ok and continuity_ok and not is_mock:
-                        break
-                        
-                    fail_reason = 'MOCK fallback' if is_mock else ('low coverage' if not coverage_ok else 'continuity failure')
-                    wait = 20 if is_mock else 2  # real backoff when providers are down,
-                                                  # not just a token retry delay
-                    logger.warning(
-                        f"    Attempt {attempt+1}/{attempts} "
-                        f"({fail_reason}), "
-                        f"retrying in {wait}s..."
-                    )
-                    if attempt < attempts - 1:
-                        time.sleep(wait)
-
+                
+                # V5: The simplified loop now populates best_scenes and is_covered.
+                # We need to map this to the variables the rest of the function expects.
                 scenes = best_scenes or []
+                is_mock = any(s.get("_mock_fallback") for s in scenes)
+                
+                # Check coverage status
+                best_coverage_ok = coverage_validator.validate(chunk_text, scenes)
+                best_is_mock = is_mock
 
                 if best_is_mock:
                     # Every attempt for this chunk hit the LLM fallback. Do not let
