@@ -82,10 +82,10 @@ class UnifiedPipeline:
             "character_success": 0,
             "location_success": 0,
             "event_success": 0,
-            "groq_429_count": 0,
             "llm_failures": 0,
-            "avg_latency": 0,
-            "avg_tokens": 0
+            "retries_queued": 0,
+            "avg_extraction_latency": 0.0,
+            "avg_planning_latency": 0.0
         }
 
         logger.info(f"Pipeline ready for project: {project_name}")
@@ -120,6 +120,8 @@ class UnifiedPipeline:
             
         with open(queue_path, "w", encoding="utf-8") as f:
             json.dump(queue, f, indent=2)
+            
+        self.metrics["retries_queued"] += 1
 
     def _save_metrics(self):
         metrics_path = os.path.join(self.pm.project_dir, "artifacts", "run_metrics.json")
@@ -180,7 +182,7 @@ class UnifiedPipeline:
         if source_file:
             self.import_source(source_file)
             
-        if not getattr(self.llm, "is_available", True):
+        if not getattr(self.extractor_llm, "is_available", True):
             logger.error("🛑 CRITICAL: No LLM provider is reachable. The pipeline cannot run.")
             logger.error("   → If using Ollama (local): Ensure the server is running (`ollama serve`).")
             logger.error("   → If using Groq (cloud): Ensure GROQ_API_KEY is set in your environment.")
@@ -220,7 +222,7 @@ class UnifiedPipeline:
             logger.warning(f"No input files found in projects/{self.project_name}/input/")
             return
 
-        pipeline = TranslationPipeline(config=self.config.config, llm_adapter=self.llm)
+        pipeline = TranslationPipeline(config=self.config.config, llm_adapter=self.extractor_llm)
 
         for file_path in input_files:
             filename = os.path.basename(file_path)
@@ -238,7 +240,7 @@ class UnifiedPipeline:
             text = self.pm.read_input(file_path)
             
             if pipeline.is_translation_needed(text):
-                if not getattr(self.llm, "is_available", True):
+                if not getattr(self.extractor_llm, "is_available", True):
                     logger.error(f"❌ Stage 1 Aborted: Translation required for {filename} but no LLM provider is reachable.")
                     return
             
@@ -252,7 +254,7 @@ class UnifiedPipeline:
     # ── Stage 2: Memory Extraction ────────────────────────────────────────────
     def stage_memory(self):
         logger.info("─── Stage 2: Memory Extraction ───")
-        if not getattr(self.llm, "is_available", True):
+        if not getattr(self.extractor_llm, "is_available", True):
             logger.error("❌ Stage 2 Aborted: No LLM provider reachable (Groq/Ollama). "
                          "Check your internet or start Ollama local server.")
             return
@@ -285,10 +287,13 @@ class UnifiedPipeline:
                 
                 # Proactive delay to avoid Groq Rate Limits
                 import time
-                if getattr(self.llm, "is_cloud", False):
+                if getattr(self.extractor_llm, "is_cloud", False):
                     time.sleep(5)
 
                 existing_chars = self.memory_db.get_all_characters()
+                
+                import time
+                start_time = time.time()
                 
                 try:
                     chars_data = extractor.extract_characters(chunk_text, existing_characters=existing_chars)
@@ -315,6 +320,11 @@ class UnifiedPipeline:
                         continue
                     self.metrics["event_success"] += 1
                     
+                    elapsed = time.time() - start_time
+                    prev_avg = self.metrics["avg_extraction_latency"]
+                    n = self.metrics["chunks_processed"]
+                    self.metrics["avg_extraction_latency"] = (prev_avg * n + elapsed) / (n + 1)
+                    
                     self.metrics["chunks_processed"] += 1
                     
                     data = {
@@ -324,6 +334,13 @@ class UnifiedPipeline:
                         "relationships": events_data.get("relationships", []),
                         "world_concepts": []
                     }
+
+                    if not data["characters"] and not data["locations"] and not data["events"]:
+                        self.metrics["chunks_failed"] += 1
+                        self._add_to_retry_queue("memory", sub_key, "extraction_returned_empty_data")
+                        logger.warning(f"  ⚠️  Chunk {idx+1}/{len(chunks)} of {filename} returned empty extraction data.")
+                        continue
+
                 except Exception as e:
                     self.metrics["chunks_failed"] += 1
                     self.metrics["llm_failures"] += 1
@@ -396,10 +413,10 @@ class UnifiedPipeline:
         chars = self.memory_db.get_all_characters()
         locs = self.memory_db.get_all_locations()
         logger.info(f"✅ Memory: {len(chars)} characters, {len(locs)} locations extracted")
-        if getattr(self.llm, "fallback_count", 0) > 0:
-            logger.error(
-                f"⚠️  Stage 2 had {self.llm.fallback_count} LLM fallback(s) out of "
-                f"{self.llm.total_calls} calls — those chunks were skipped and will "
+        if getattr(self.extractor_llm, "fallback_count", 0) > 0:
+            logger.warning(
+                f"⚠️  Stage 2 had {self.extractor_llm.fallback_count} LLM fallback(s) out of "
+                f"{self.extractor_llm.total_calls} calls — those chunks were skipped and will "
                 f"retry automatically on the next run."
             )
 
@@ -451,7 +468,7 @@ class UnifiedPipeline:
     # ── Stage 4: Visual Planning ──────────────────────────────────────────────
     def stage_visual_planning(self):
         logger.info("─── Stage 4: Visual Planning ───")
-        if not getattr(self.llm, "is_available", True):
+        if not getattr(self.planner_llm, "is_available", True):
             logger.error("❌ Stage 4 Aborted: No LLM provider reachable. Fill missing scenes "
                          "by re-running this stage once your LLM is back.")
             return
@@ -556,6 +573,8 @@ class UnifiedPipeline:
                 best_coverage = 0.0
                 
                 try:
+                    import time
+                    start_time = time.time()
                     for attempt in range(3):
                         chunk_scenes = planner.plan_scenes(chunk_text, chunk_chapter, events=chunk_events)
                         if not chunk_scenes:
@@ -570,6 +589,12 @@ class UnifiedPipeline:
                             
                         time.sleep(2)
                     
+                    elapsed = time.time() - start_time
+                    prev_avg = self.metrics.get("avg_planning_latency", 0.0)
+                    n = self.metrics.get("chunks_processed", 1) - 1 # Use chunks_processed from earlier
+                    if n < 0: n = 0
+                    self.metrics["avg_planning_latency"] = (prev_avg * n + elapsed) / (n + 1)
+
                     chunk_scenes = best_scenes
                     scenes = best_scenes or []
                     
@@ -660,10 +685,10 @@ class UnifiedPipeline:
 
         self.pm.save_checkpoint("visual_planning", "done")
         logger.info(f"✅ Visual planning: {len(all_scenes)} scenes")
-        if getattr(self.llm, "fallback_count", 0) > 0:
-            logger.error(
-                f"⚠️  Stage 4 had {self.llm.fallback_count} LLM fallback(s) out of "
-                f"{self.llm.total_calls} calls this run."
+        if getattr(self.planner_llm, "fallback_count", 0) > 0:
+            logger.warning(
+                f"⚠️  Stage 4 had {self.planner_llm.fallback_count} LLM fallback(s) out of "
+                f"{self.planner_llm.total_calls} calls this run."
             )
 
     # ── Stage 5: Image Generation ─────────────────────────────────────────────
@@ -702,7 +727,7 @@ class UnifiedPipeline:
             return
 
         logger.info(f"  Generating {len(scenes_to_process)} new images (total {total_shots_in_clips} shots)…")
-        prompter = PromptGenerator(self.memory_db, config=self.config.config, llm_adapter=self.llm)
+        prompter = PromptGenerator(self.memory_db, config=self.config.config, llm_adapter=self.planner_llm)
 
         for shot in scenes_to_process:
             sid = shot["scene_id"]
@@ -821,7 +846,7 @@ class UnifiedPipeline:
             f"includes the story beats and characters mentioned."
         )
         
-        seo_data_raw = self.llm.generate_json(prompt, system_prompt=system)
+        seo_data_raw = self.planner_llm.generate_json(prompt, system_prompt=system)
         package_path = os.path.join(self.pm.dirs["export"], "upload_package.json")
         try:
             seo = json.loads(seo_data_raw)
