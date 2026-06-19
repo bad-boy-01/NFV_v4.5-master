@@ -71,7 +71,8 @@ class UnifiedPipeline:
         self.pm = ProjectManager(self.base_dir, project_name)
         self.memory_db = MemoryEngine(self.pm.project_dir)
 
-        self._llm = None
+        self._extractor_llm = None
+        self._planner_llm = None
         self._image_gen = None
         self._audio_gen = None
 
@@ -128,11 +129,20 @@ class UnifiedPipeline:
 
     # ── Lazy adapters ─────────────────────────────────────────────────────────
     @property
-    def llm(self):
-        if self._llm is None:
+    def extractor_llm(self):
+        if self._extractor_llm is None:
             from models.llm_adapter import SmartLLMAdapter
-            self._llm = SmartLLMAdapter(config=self.config.config)
-        return self._llm
+            ext_provider = self.config.get("models", {}).get("llm", {}).get("extractor_provider", "gemini")
+            self._extractor_llm = SmartLLMAdapter(config=self.config.config, provider_override=ext_provider)
+        return self._extractor_llm
+
+    @property
+    def planner_llm(self):
+        if self._planner_llm is None:
+            from models.llm_adapter import SmartLLMAdapter
+            plan_provider = self.config.get("models", {}).get("llm", {}).get("planner_provider", "groq")
+            self._planner_llm = SmartLLMAdapter(config=self.config.config, provider_override=plan_provider)
+        return self._planner_llm
 
     @property
     def image_gen(self):
@@ -150,9 +160,12 @@ class UnifiedPipeline:
         return self._audio_gen
 
     def _unload_llm(self):
-        if self._llm is not None:
-            self._llm.unload_model()
-            self._llm = None
+        if self._extractor_llm is not None:
+            self._extractor_llm.unload_model()
+            self._extractor_llm = None
+        if self._planner_llm is not None:
+            self._planner_llm.unload_model()
+            self._planner_llm = None
             gc.collect()
 
     def _unload_image_gen(self):
@@ -254,7 +267,7 @@ class UnifiedPipeline:
             logger.warning("No translated files found — run stage_translate first")
             return
 
-        extractor = MemoryExtractor(self.llm, config=self.config.config)
+        extractor = MemoryExtractor(self.extractor_llm, config=self.config.config)
         world_style_saved = False
 
         for filename in translated_files:
@@ -359,7 +372,7 @@ class UnifiedPipeline:
                 style_file = os.path.join(self.pm.dirs["memory"], "world_style.txt")
                 if not world_style_saved and not os.path.exists(style_file):
                     style = extractor.extract_world_style(chunk_text)
-                    if getattr(self.llm, "last_call_was_fallback", False):
+                    if getattr(self.extractor_llm, "last_call_was_fallback", False):
                         # Don't lock in a generic mock style for the whole project —
                         # retry this on the next run once the LLM is actually up.
                         logger.error(
@@ -477,11 +490,11 @@ class UnifiedPipeline:
             current_chapter = max_chapter + 1
             logger.info(f"  Starting new content from chapter {current_chapter} based on existing clips.")
 
-        planner = ScenePlanner(self.llm, config=self.config.config)
-        prompter = PromptGenerator(self.memory_db, config=self.config.config, llm_adapter=self.llm)
+        planner = ScenePlanner(self.planner_llm, config=self.config.config)
+        prompter = PromptGenerator(self.memory_db, config=self.config.config, llm_adapter=self.planner_llm)
         scene_validator = SceneValidator(config=self.config.config)
         coverage_validator = CoverageValidator(threshold=0.85)
-        continuity_validator = ContinuityValidator(self.llm, importance_threshold=7)
+        continuity_validator = ContinuityValidator(self.planner_llm, importance_threshold=7)
         
         words_per_chunk = 250
         scenes_per_clip = self.config.get("storyboard.scenes_per_clip", 67)
@@ -526,7 +539,7 @@ class UnifiedPipeline:
                 
                 # Proactive delay to avoid Groq Rate Limits
                 import time
-                if getattr(self.llm, "is_cloud", False):
+                if getattr(self.planner_llm, "is_cloud", False):
                     time.sleep(2)
 
                 # V5: Reduce effective chunk size for local model

@@ -27,24 +27,32 @@ class MemoryExtractor:
         known = ", ".join(relevant_names) if relevant_names else "none yet"
 
         system = (
-            "You are a visual character extractor for a Korean manhwa AI pipeline. "
-            "Extract ALL named characters from the following text. "
-            f"Relevant known characters already in the database: [{known}]. "
-            "For new characters, extract static visual DNA as booru-style tags. "
-            "For ALL characters (new and existing), extract their CURRENT dynamic state (outfit, injuries, emotion). "
-            "Output ONLY valid JSON with this structure:\n"
-            '{"characters": [{"canonical_name": "Name", "visual_dna": {'
-            '"subject": "1boy or 1girl", "age": "e.g. 20 years old, teenager, ancient", '
-            '"hair": "black short hair", "eyes": "sharp brown eyes", "build": "athletic", '
-            '"clothing": "white martial arts robe", "accessories": ""}, '
-            '"current_state": {"outfit": "torn white robe", "injuries": "bleeding cheek", "emotion": "angry"}}]} '
-            "Return empty array if nothing found. NO extra text outside the JSON."
+            "You are an information extraction engine.\n\n"
+            "Extract ONLY characters mentioned in the text.\n\n"
+            "Rules:\n"
+            "- Return ONLY valid JSON.\n"
+            "- No markdown.\n"
+            "- No explanations.\n"
+            "- Include every named character.\n"
+            "- Do not invent characters.\n"
+            '- If no characters exist, return {"characters":[]}\n\n'
+            "JSON Schema:\n"
+            "{\n"
+            '  "characters": [\n'
+            "    {\n"
+            '      "name": "",\n'
+            '      "gender": "",\n'
+            '      "description": "",\n'
+            '      "role": ""\n'
+            "    }\n"
+            "  ]\n"
+            "}"
         )
-        prompt = text[:3000]
+        prompt = f"TEXT:\n\n{text[:3000]}"
         logger.info(f"  [Compression] Characters: {len(existing_names)} total -> {len(relevant_names)} relevant. Prompt length: {len(prompt)} chars.")
         
         max_t = self.config.get("models", {}).get("llm", {}).get("character_max_tokens", 1200)
-        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.1, max_tokens=max_t)
+        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.0, max_tokens=max_t)
         try:
             return json.loads(result)
         except Exception as e:
@@ -53,15 +61,26 @@ class MemoryExtractor:
 
     def extract_locations(self, text: str) -> Dict:
         system = (
-            "You are a visual location extractor for a Korean manhwa AI pipeline. "
-            "Extract ALL locations from the following text. "
-            "Output ONLY valid JSON with this structure:\n"
-            '{"locations": [{"canonical_name": "Name", "description": "brief", '
-            '"visual_tags": "stone courtyard, ancient pillars, morning mist"}]} '
-            "Return empty array if nothing found. NO extra text outside the JSON."
+            "You are an information extraction engine.\n\n"
+            "Extract all locations mentioned in the text.\n\n"
+            "Rules:\n"
+            "- Return ONLY JSON.\n"
+            "- No markdown.\n"
+            "- No explanations.\n"
+            "- Do not invent locations.\n\n"
+            "JSON Schema:\n"
+            "{\n"
+            '  "locations": [\n'
+            "    {\n"
+            '      "name": "",\n'
+            '      "description": ""\n'
+            "    }\n"
+            "  ]\n"
+            "}"
         )
+        prompt = f"TEXT:\n\n{text[:3000]}"
         max_t = self.config.get("models", {}).get("llm", {}).get("location_max_tokens", 800)
-        result = self.llm.generate_json(text[:3000], system_prompt=system, temperature=0.1, max_tokens=max_t)
+        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.0, max_tokens=max_t)
         try:
             return json.loads(result)
         except Exception as e:
@@ -74,23 +93,31 @@ class MemoryExtractor:
         known = ", ".join(relevant_names) if relevant_names else "none yet"
 
         system = (
-            "You are a narrative event extractor for a Korean manhwa AI pipeline. "
-            "Extract ALL narrative events, actions, and relationships from the text. "
-            f"Relevant known characters: [{known}]. "
-            "Output ONLY valid JSON with this structure:\n"
-            '{"events": [{"summary": "Brief description of the action", '
-            '"importance": 8, "involved_characters": ["Name1", "Name2"], '
-            '"location": "Name"}], '
-            '"relationships": [{"char1": "Name1", "char2": "Name2", "type": "rivals", '
-            '"description": "brief context"}]} '
-            "Note: 'importance' is a 1-10 scale where 10 is a major battle or plot twist. "
-            "Return empty arrays if nothing found. NO extra text outside the JSON."
+            "You are extracting story events.\n\n"
+            "Extract major story beats in chronological order.\n\n"
+            "Rules:\n"
+            "- Return ONLY JSON.\n"
+            "- No markdown.\n"
+            "- No explanations.\n"
+            "- One event per significant action.\n"
+            "- Preserve order.\n\n"
+            "JSON Schema:\n"
+            "{\n"
+            '  "events": [\n'
+            "    {\n"
+            '      "event_id": 1,\n'
+            '      "summary": "",\n'
+            '      "importance": 8,\n'
+            '      "characters": []\n'
+            "    }\n"
+            "  ]\n"
+            "}"
         )
-        prompt = text[:3000]
+        prompt = f"TEXT:\n\n{text[:3000]}"
         logger.info(f"  [Compression] Events: {len(existing_names)} total -> {len(relevant_names)} relevant. Prompt length: {len(prompt)} chars.")
 
         max_t = self.config.get("models", {}).get("llm", {}).get("event_max_tokens", 2000)
-        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.1, max_tokens=max_t)
+        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.0, max_tokens=max_t)
         try:
             return json.loads(result)
         except Exception as e:

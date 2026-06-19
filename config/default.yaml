@@ -13,12 +13,15 @@ models:
   llm:
     # Primary: Groq local (qwen2.5:7b) - recommended to avoid Groq rate limits
     # Fallback: Groq free-tier (sign up FREE at console.groq.com)
-    provider: "groq"           # "groq" | "ollama"
+    extractor_provider: "gemini"       # "gemini" | "ollama" | "groq"
+    planner_provider: "groq"
+    translation_provider: "groq"
+    
     model: "llama-3.3-70b-versatile"   # Groq free model
     planning_model: "llama-3.3-70b-versatile"
     translation_model: "llama-3.3-70b-versatile"
     ollama_host: "http://localhost:11434"
-    ollama_model: "qwen2.5:7b"   # Primary if provider is ollama
+    ollama_model: "qwen2.5:7b"   # Use 7b/8b for extraction to save VRAM
     character_max_tokens: 1200
     location_max_tokens: 800
     event_max_tokens: 2000

@@ -20,29 +20,43 @@ class ScenePlanner:
         self.config = config or {}
 
     def plan_scenes(self, text_chunk: str, chapter: int = 1, events: List[Dict] = None) -> List[Dict]:
-        """Convert a text chunk into a list of visual scenes."""
-        events_context = ""
-        if events:
-            # Provide the LLM with the ground-truth events so it doesn't skip them
-            events_text = "\n".join([f"- {e.get('summary', '')}" for e in events])
-            events_context = (
-                f"\nCRITICAL: Ensure your scenes cover the following key events:\n"
-                f"{events_text}\n"
-            )
-
+        """Convert a text chunk into a list of visual scenes, using events as a skeleton."""
         system = (
-            "You are a storyboarding engine. Turn the text chunk into a JSON array of scenes. "
-            "FOLLOW THESE RULES:\n"
+            "You are a cinematic storyboard director.\n"
+            "Turn the provided source_text into a JSON array of sequential scenes.\n\n"
+            "RULES:\n"
             "1. NO SUMMARIZATION: Every sentence must be its own scene. One sentence = one scene.\n"
-            "2. 100% COVERAGE: The 'narration_text' of all scenes must equal the source text 100%.\n"
-            "3. FORMAT: Output ONLY a JSON array [{},{}].\n\n"
-            "EXAMPLE:\n"
-            "[{\"scene_id\": \"SC001\", \"location\": \"Room\", \"characters\": [\"Xu\"], \"emotion\": \"neutral\", \"action\": \"Xu sits.\", \"camera_angle\": \"medium shot\", \"lighting\": \"daylight\", \"visual_prompt_tags\": \"1boy\", \"narration_text\": \"Xu sits.\", \"complexity\": 5}]\n\n"
-            f"{events_context}"
+            "2. 100% COVERAGE: The 'narration_text' of all scenes combined must equal the source text 100%.\n"
+            "3. USE EVENTS: Use the provided events as mandatory coverage targets. Every event must appear in at least one scene.\n"
+            "4. USE SOURCE TEXT: Use source_text for visual details, dialogue context, emotion, atmosphere, clothing, and scene composition.\n"
+            "5. OUTPUT ONLY VALID JSON: Return a JSON object with a 'scenes' array.\n\n"
+            "JSON SCHEMA:\n"
+            "{\n"
+            '  "scenes": [\n'
+            "    {\n"
+            '      "scene_id": "SC001",\n'
+            '      "location": "Room",\n'
+            '      "characters": ["Xu"],\n'
+            '      "emotion": "neutral",\n'
+            '      "action": "Xu sits.",\n'
+            '      "camera_angle": "medium shot",\n'
+            '      "lighting": "daylight",\n'
+            '      "visual_prompt_tags": "1boy",\n'
+            '      "narration_text": "Xu sits.",\n'
+            '      "complexity": 5\n'
+            "    }\n"
+            "  ]\n"
+            "}"
         )
 
+        payload = {
+            "events": events or [],
+            "source_text": text_chunk[:3000]
+        }
+        prompt = json.dumps(payload, indent=2)
+
         max_t = self.config.get("models", {}).get("llm", {}).get("scene_max_tokens", 2500)
-        response = self.llm.generate_json(text_chunk, system_prompt=system, temperature=0.2, max_tokens=max_t)
+        response = self.llm.generate_json(prompt, system_prompt=system, temperature=0.2, max_tokens=max_t)
         
         try:
             scenes = json.loads(response)

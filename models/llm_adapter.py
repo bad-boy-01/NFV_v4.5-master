@@ -139,6 +139,164 @@ class GroqLLMAdapter:
     def unload_model(self, *args, **kwargs):
         pass  # No-op for API-based adapters
 
+# ── Gemini API Adapter ────────────────────────────────────────────────────────
+class GeminiLLMAdapter:
+    def __init__(self, model_name: str = "gemini-2.5-flash", api_key: str = None):
+        self.model_name = model_name
+        self.api_key = api_key or self._load_key()
+        self.is_cloud = True
+        
+        if self.api_key:
+            import google.generativeai as genai
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel(self.model_name)
+        else:
+            self.model = None
+
+    def _load_key(self) -> str:
+        key = os.environ.get("GEMINI_API_KEY", "")
+        if not key:
+            try:
+                from kaggle_secrets import UserSecretsClient  # type: ignore
+                key = UserSecretsClient().get_secret("GEMINI_API_KEY")
+            except Exception:
+                pass
+        return key
+
+    def check_health(self) -> bool:
+        return bool(self.api_key)
+
+    def generate(self, prompt: str, system_prompt: str = None,
+                 temperature: float = 0.7, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
+        if not self.model:
+            return "ERROR: GEMINI_NO_API_KEY"
+
+        import google.generativeai as genai
+        
+        full_prompt = f"System: {system_prompt}\n\nUser: {prompt}" if system_prompt else prompt
+        generation_config = genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+        
+        for attempt in range(3):
+            try:
+                response = self.model.generate_content(full_prompt, generation_config=generation_config)
+                return response.text
+            except Exception as e:
+                logger.warning(f"Gemini attempt {attempt+1} failed: {e}")
+                time.sleep(2)
+        return "ERROR: GEMINI_FAILED"
+
+    def generate_json(self, prompt: str, system_prompt: str = None,
+                      temperature: float = 0.1, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
+        import google.generativeai as genai
+        if not self.model:
+            return "ERROR: GEMINI_NO_API_KEY"
+
+        full_prompt = f"System: {system_prompt} You must output valid JSON.\n\nUser: {prompt}" if system_prompt else f"{prompt}\nYou must output valid JSON."
+        generation_config = genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            response_mime_type="application/json"
+        )
+        
+        for attempt in range(3):
+            try:
+                response = self.model.generate_content(full_prompt, generation_config=generation_config)
+                return self._repair(response.text)
+            except Exception as e:
+                logger.warning(f"Gemini JSON attempt {attempt+1} failed: {e}")
+                time.sleep(2)
+        return "ERROR: GEMINI_FAILED"
+
+    def _repair(self, content: str) -> str:
+        if "ERROR:" in content: return content
+        try:
+            repaired = repair_json(content)
+            if isinstance(repaired, (dict, list)):
+                return json.dumps(repaired)
+            return repaired
+        except Exception:
+            return content
+
+    def unload_model(self, *args, **kwargs):
+        pass
+
+# ── Ollama Adapter ────────────────────────────────────────────────────────────
+class OllamaLLMAdapter:
+    def __init__(self, host: str = "http://localhost:11434", model_name: str = "qwen2.5:7b"):
+        self.host = host
+        self.model_name = model_name
+        self.is_cloud = False
+
+    def check_health(self) -> bool:
+        try:
+            r = requests.get(f"{self.host}/api/tags", timeout=2)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def generate(self, prompt: str, system_prompt: str = None,
+                 temperature: float = 0.7, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
+        url = f"{self.host}/api/generate"
+        payload = {
+            "model": model or self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            }
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+            
+        try:
+            r = requests.post(url, json=payload, timeout=300)
+            r.raise_for_status()
+            return r.json().get("response", "")
+        except Exception as e:
+            logger.warning(f"Ollama generation failed: {e}")
+            return "ERROR: OLLAMA_FAILED"
+
+    def generate_json(self, prompt: str, system_prompt: str = None,
+                      temperature: float = 0.0, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
+        url = f"{self.host}/api/generate"
+        payload = {
+            "model": model or self.model_name,
+            "prompt": prompt,
+            "format": "json",
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            }
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+            
+        try:
+            r = requests.post(url, json=payload, timeout=300)
+            r.raise_for_status()
+            return self._repair(r.json().get("response", ""))
+        except Exception as e:
+            logger.warning(f"Ollama JSON generation failed: {e}")
+            return "ERROR: OLLAMA_FAILED"
+
+    def _repair(self, content: str) -> str:
+        if "ERROR:" in content: return content
+        try:
+            repaired = repair_json(content)
+            if isinstance(repaired, (dict, list)):
+                return json.dumps(repaired)
+            return repaired
+        except Exception:
+            return content
+
+    def unload_model(self, *args, **kwargs):
+        pass
+
 
 # ── DeepSeek API Adapter (Fallback) ───────────────────────────────────────────
 class DeepSeekLLMAdapter:
@@ -258,16 +416,17 @@ class SmartLLMAdapter:
     - `strict_mode` (config: models.llm.strict_mode) — when True, raises
       LLMFallbackExhausted instead of returning mock content at all.
     """
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, provider_override: str = None):
         cfg = config or {}
         models = cfg.get("models", {}).get("llm", {})
 
-        provider = models.get("provider", "groq").lower()
+        self.provider = provider_override or models.get("provider", "groq").lower()
         groq_model = models.get("model", "llama-3.3-70b-versatile")
         deepseek_model = models.get("deepseek_model", "deepseek-chat")
-        # NOTE: previously defined in config/default.yaml (under `system:`)
-        # but never read anywhere in the codebase — strict_mode had no
-        # effect regardless of its value.
+        gemini_model = "gemini-2.5-flash"
+        ollama_model = models.get("ollama_model", "qwen2.5:7b")
+        ollama_host = models.get("ollama_host", "http://localhost:11434")
+
         self.strict_mode = bool(cfg.get("system", {}).get("strict_mode", False))
 
         self.last_call_was_fallback = False
@@ -276,21 +435,40 @@ class SmartLLMAdapter:
 
         self._groq = GroqLLMAdapter(model_name=groq_model)
         self._deepseek = DeepSeekLLMAdapter(model_name=deepseek_model)
+        self._gemini = GeminiLLMAdapter(model_name=gemini_model)
+        self._ollama = OllamaLLMAdapter(host=ollama_host, model_name=ollama_model)
 
-        # Pick primary adapter based on availability, preferring DeepSeek if key exists
-        if self._deepseek.check_health():
-            # Force DeepSeek if key is provided, as Groq's daily limits are too tight for novels
-            self._primary = self._deepseek
-            logger.info(f"LLM: Using DeepSeek ({deepseek_model}) as primary")
-        elif self._groq.check_health():
+        self._primary = None
+        
+        # Route explicitly if provider matches
+        if self.provider == "gemini" and self._gemini.check_health():
+            self._primary = self._gemini
+            logger.info(f"LLM: Routed strictly to Gemini ({gemini_model})")
+        elif self.provider == "ollama" and self._ollama.check_health():
+            self._primary = self._ollama
+            logger.info(f"LLM: Routed strictly to Ollama ({ollama_model})")
+        elif self.provider == "groq" and self._groq.check_health():
             self._primary = self._groq
-            logger.info("LLM: Using Groq free-tier (llama-3.3-70b) as primary")
-        elif self._deepseek.check_health():
+            logger.info(f"LLM: Routed strictly to Groq ({groq_model})")
+        elif self.provider == "deepseek" and self._deepseek.check_health():
             self._primary = self._deepseek
-            logger.info(f"LLM: Using DeepSeek ({deepseek_model}) as fallback primary")
+            logger.info(f"LLM: Routed strictly to DeepSeek ({deepseek_model})")
         else:
-            self._primary = None
-            logger.warning("LLM: No adapter available — mock mode active")
+            # Automatic fallback routing if preferred provider is down
+            if self._deepseek.check_health():
+                self._primary = self._deepseek
+                logger.info(f"LLM: Fallback to DeepSeek ({deepseek_model})")
+            elif self._groq.check_health():
+                self._primary = self._groq
+                logger.info(f"LLM: Fallback to Groq ({groq_model})")
+            elif self._gemini.check_health():
+                self._primary = self._gemini
+                logger.info(f"LLM: Fallback to Gemini ({gemini_model})")
+            elif self._ollama.check_health():
+                self._primary = self._ollama
+                logger.info(f"LLM: Fallback to Ollama ({ollama_model})")
+            else:
+                logger.warning("LLM: No adapter available — mock mode active")
 
     @property
     def is_cloud(self) -> bool:
@@ -328,14 +506,19 @@ class SmartLLMAdapter:
 
         if "ERROR:" in result:
             logger.warning(f"Primary LLM failed ({result}). Trying fallback...")
-            # If Groq failed, try DeepSeek
-            if self._primary == self._groq and self._deepseek.check_health():
-                result = self._deepseek.generate(
-                    prompt, system_prompt=system_prompt,
-                    temperature=temperature, model=model, **kwargs
-                )
+            # If Groq failed, try DeepSeek or Gemini
+            if self._primary == self._groq:
+                if self._deepseek.check_health():
+                    result = self._deepseek.generate(
+                        prompt, system_prompt=system_prompt,
+                        temperature=temperature, model=model, **kwargs
+                    )
+                elif self._gemini.check_health():
+                    result = self._gemini.generate(
+                        prompt, system_prompt=system_prompt,
+                        temperature=temperature, model=model, **kwargs
+                    )
 
-            # If DeepSeek also fails or was the primary, exhaust to mock/strict
             if "ERROR:" in result:
                 return self._handle_exhausted(system_prompt or "", prompt)
 
@@ -357,11 +540,17 @@ class SmartLLMAdapter:
 
         if "ERROR:" in result:
             logger.warning(f"Primary LLM JSON failed ({result}). Trying fallback...")
-            if self._primary == self._groq and self._deepseek.check_health():
-                result = self._deepseek.generate_json(
-                    prompt, system_prompt=system_prompt,
-                    temperature=temperature, model=model, **kwargs
-                )
+            if self._primary == self._groq:
+                if self._deepseek.check_health():
+                    result = self._deepseek.generate_json(
+                        prompt, system_prompt=system_prompt,
+                        temperature=temperature, model=model, **kwargs
+                    )
+                elif self._gemini.check_health():
+                    result = self._gemini.generate_json(
+                        prompt, system_prompt=system_prompt,
+                        temperature=temperature, model=model, **kwargs
+                    )
 
             if "ERROR:" in result:
                 return self._handle_exhausted(system_prompt or "", prompt)
