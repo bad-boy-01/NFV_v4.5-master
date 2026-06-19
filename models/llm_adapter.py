@@ -18,6 +18,13 @@ from json_repair import repair_json
 
 logger = logging.getLogger(__name__)
 
+QUOTA_MARKERS = [
+    "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+    "generate_content_free_tier_requests",
+    "quota exceeded",
+    "RESOURCE_EXHAUSTED",
+]
+
 
 class LLMFallbackExhausted(Exception):
     """
@@ -184,7 +191,11 @@ class GeminiLLMAdapter:
                 response = self.model.generate_content(full_prompt, generation_config=generation_config)
                 return response.text
             except Exception as e:
-                logger.warning(f"Gemini attempt {attempt+1} failed: {e}")
+                err_str = str(e)
+                logger.warning(f"Gemini attempt {attempt+1} failed: {err_str}")
+                for marker in QUOTA_MARKERS:
+                    if marker in err_str:
+                        return '{"_quota_exhausted": true}'
                 time.sleep(2)
         return "ERROR: GEMINI_FAILED"
 
@@ -206,7 +217,11 @@ class GeminiLLMAdapter:
                 response = self.model.generate_content(full_prompt, generation_config=generation_config)
                 return self._repair(response.text)
             except Exception as e:
-                logger.warning(f"Gemini JSON attempt {attempt+1} failed: {e}")
+                err_str = str(e)
+                logger.warning(f"Gemini JSON attempt {attempt+1} failed: {err_str}")
+                for marker in QUOTA_MARKERS:
+                    if marker in err_str:
+                        return '{"_quota_exhausted": true}'
                 time.sleep(2)
         return "ERROR: GEMINI_FAILED"
 
@@ -404,23 +419,17 @@ class DeepSeekLLMAdapter:
 # ── Smart Adapter: tries Groq first, falls back to DeepSeek ────────────────────
 class SmartLLMAdapter:
     """
-    Tries Groq (free cloud) first by default, but honors 'provider' setting.
-    If 'provider' is 'deepseek', it uses DeepSeek as primary.
-
-    Fallback visibility (fixes the silent-mock-substitution bug):
-    - `last_call_was_fallback` is set on every call so callers can check
-      immediately whether the result is real LLM output or mock content.
-    - `fallback_count` accumulates across the adapter's lifetime so a stage
-      can log "N/M calls used fallback content" at the end instead of the
-      problem only being discoverable by inspecting output files later.
-    - `strict_mode` (config: models.llm.strict_mode) — when True, raises
-      LLMFallbackExhausted instead of returning mock content at all.
+    Intelligent router. Prioritizes a specific provider based on config.
+    Falls back to other available providers if the preferred one fails or goes offline.
     """
-    def __init__(self, config: dict = None, provider_override: str = None):
+    def __init__(self, config: dict = None, provider_override: str = None, allow_fallback: bool = True):
         cfg = config or {}
         models = cfg.get("models", {}).get("llm", {})
 
         self.provider = provider_override or models.get("provider", "groq").lower()
+        self.allow_fallback = allow_fallback
+        self.quota_exhausted = False
+        
         groq_model = models.get("model", "llama-3.3-70b-versatile")
         deepseek_model = models.get("deepseek_model", "deepseek-chat")
         gemini_model = "gemini-2.5-flash"
@@ -496,6 +505,9 @@ class SmartLLMAdapter:
         self.total_calls += 1
         self.last_call_was_fallback = False
 
+        if self.quota_exhausted:
+            return '{"_quota_exhausted": true}'
+
         if self._primary is None:
             return self._handle_exhausted(system_prompt or "", prompt)
 
@@ -504,7 +516,11 @@ class SmartLLMAdapter:
             temperature=temperature, model=model, **kwargs
         )
 
-        if "ERROR:" in result:
+        if "_quota_exhausted" in result:
+            self.quota_exhausted = True
+            return result
+
+        if "ERROR:" in result and self.allow_fallback:
             logger.warning(f"Primary LLM failed ({result}). Trying fallback...")
             # If primary failed, try other available providers
             for fallback in [self._groq, self._gemini, self._deepseek, self._ollama]:
@@ -514,7 +530,7 @@ class SmartLLMAdapter:
                         prompt, system_prompt=system_prompt,
                         temperature=temperature, model=model, **kwargs
                     )
-                    if "ERROR:" not in result:
+                    if "ERROR:" not in result and "_quota_exhausted" not in result:
                         break
 
             if "ERROR:" in result:
@@ -528,6 +544,9 @@ class SmartLLMAdapter:
         self.total_calls += 1
         self.last_call_was_fallback = False
 
+        if self.quota_exhausted:
+            return '{"_quota_exhausted": true}'
+
         if self._primary is None:
             return self._handle_exhausted(system_prompt or "", prompt)
 
@@ -536,7 +555,11 @@ class SmartLLMAdapter:
             temperature=temperature, model=model, **kwargs
         )
 
-        if "ERROR:" in result:
+        if "_quota_exhausted" in result:
+            self.quota_exhausted = True
+            return result
+
+        if "ERROR:" in result and self.allow_fallback:
             logger.warning(f"Primary LLM JSON failed ({result}). Trying fallback...")
             # If primary failed, try other available providers
             for fallback in [self._groq, self._gemini, self._deepseek, self._ollama]:
@@ -546,7 +569,7 @@ class SmartLLMAdapter:
                         prompt, system_prompt=system_prompt,
                         temperature=temperature, model=model, **kwargs
                     )
-                    if "ERROR:" not in result:
+                    if "ERROR:" not in result and "_quota_exhausted" not in result:
                         break
 
             if "ERROR:" in result:

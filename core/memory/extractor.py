@@ -21,6 +21,65 @@ class MemoryExtractor:
     def _gen_json(self, prompt: str, system: str, temperature: float = 0.1) -> str:
         return self.llm.generate_json(prompt, system_prompt=system, temperature=temperature)
 
+    def extract_all(self, text: str, existing_characters: list = None) -> Dict:
+        existing_names = [c.get("canonical_name", "") for c in (existing_characters or []) if c.get("canonical_name")]
+        relevant_names = [n for n in existing_names if n.lower() in text.lower()]
+        known = ", ".join(relevant_names) if relevant_names else "none yet"
+
+        system = (
+            "You are a master story extraction engine.\n\n"
+            "Extract characters, locations, events, and world style from the text.\n\n"
+            "Rules:\n"
+            "- Return ONLY valid JSON.\n"
+            "- No markdown, no explanations.\n"
+            "- Include every named character.\n"
+            "- One event per significant action, preserve chronological order.\n"
+            "- For world_style, provide 10-15 comma-separated booru tags describing era, architecture, climate, and atmosphere.\n"
+            f"- Known characters to look for: {known}\n\n"
+            "JSON Schema:\n"
+            "{\n"
+            '  "characters": [\n'
+            "    {\n"
+            '      "name": "",\n'
+            '      "gender": "",\n'
+            '      "description": "",\n'
+            '      "role": ""\n'
+            "    }\n"
+            "  ],\n"
+            '  "locations": [\n'
+            "    {\n"
+            '      "name": "",\n'
+            '      "description": ""\n'
+            "    }\n"
+            "  ],\n"
+            '  "events": [\n'
+            "    {\n"
+            '      "event_id": 1,\n'
+            '      "summary": "",\n'
+            '      "importance": 8,\n'
+            '      "characters": []\n'
+            "    }\n"
+            "  ],\n"
+            '  "world_style": ""\n'
+            "}"
+        )
+        prompt = f"TEXT:\n\n{text[:3000]}"
+        logger.info(f"  [Compression] Unified Extraction. Prompt length: {len(prompt)} chars.")
+
+        max_t = self.config.get("models", {}).get("llm", {}).get("event_max_tokens", 3000)
+        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.0, max_tokens=max_t)
+        
+        if "_quota_exhausted" in result:
+            return {"_parse_error": True, "_quota_exhausted": True, "_raw_text": result}
+            
+        try:
+            parsed = json.loads(result)
+            parsed["_parse_error"] = False
+            return parsed
+        except Exception as e:
+            logger.warning(f"extract_all JSON parse failed: {e}")
+            return {"_parse_error": True, "characters": [], "locations": [], "events": [], "world_style": "", "_raw_text": result}
+
     def extract_characters(self, text: str, existing_characters: list = None) -> Dict:
         existing_names = [c.get("canonical_name", "") for c in (existing_characters or []) if c.get("canonical_name")]
         relevant_names = [n for n in existing_names if n.lower() in text.lower()]

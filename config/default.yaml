@@ -13,8 +13,10 @@ models:
   llm:
     # Primary: Groq local (qwen2.5:7b) - recommended to avoid Groq rate limits
     # Fallback: Groq free-tier (sign up FREE at console.groq.com)
-    extractor_provider: "groq"       # "gemini" | "ollama" | "groq"
+    extractor_provider: "gemini"       # "gemini" | "ollama" | "groq"
+    extractor_allow_fallback: false
     planner_provider: "groq"
+    planner_allow_fallback: true
     translation_provider: "groq"
     
     model: "llama-3.3-70b-versatile"   # Groq free model

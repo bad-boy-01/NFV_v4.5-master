@@ -75,6 +75,8 @@ class UnifiedPipeline:
         self._planner_llm = None
         self._image_gen = None
         self._audio_gen = None
+        
+        self.extractor_unavailable = False
 
         self.metrics = {
             "chunks_processed": 0,
@@ -85,7 +87,10 @@ class UnifiedPipeline:
             "llm_failures": 0,
             "retries_queued": 0,
             "avg_extraction_latency": 0.0,
-            "avg_planning_latency": 0.0
+            "avg_planning_latency": 0.0,
+            "extractor_quota_exhausted": False,
+            "extractor_provider": self.config.get("models", {}).get("llm", {}).get("extractor_provider", "gemini"),
+            "planner_provider": self.config.get("models", {}).get("llm", {}).get("planner_provider", "groq")
         }
 
         logger.info(f"Pipeline ready for project: {project_name}")
@@ -135,7 +140,8 @@ class UnifiedPipeline:
         if self._extractor_llm is None:
             from models.llm_adapter import SmartLLMAdapter
             ext_provider = self.config.get("models", {}).get("llm", {}).get("extractor_provider", "gemini")
-            self._extractor_llm = SmartLLMAdapter(config=self.config.config, provider_override=ext_provider)
+            allow_fallback = self.config.get("models", {}).get("llm", {}).get("extractor_allow_fallback", False)
+            self._extractor_llm = SmartLLMAdapter(config=self.config.config, provider_override=ext_provider, allow_fallback=allow_fallback)
         return self._extractor_llm
 
     @property
@@ -143,7 +149,8 @@ class UnifiedPipeline:
         if self._planner_llm is None:
             from models.llm_adapter import SmartLLMAdapter
             plan_provider = self.config.get("models", {}).get("llm", {}).get("planner_provider", "groq")
-            self._planner_llm = SmartLLMAdapter(config=self.config.config, provider_override=plan_provider)
+            allow_fallback = self.config.get("models", {}).get("llm", {}).get("planner_allow_fallback", True)
+            self._planner_llm = SmartLLMAdapter(config=self.config.config, provider_override=plan_provider, allow_fallback=allow_fallback)
         return self._planner_llm
 
     @property
@@ -287,6 +294,10 @@ class UnifiedPipeline:
                 chunk_text = " ".join(s["text"] for s in chunk_data["sentences"])
                 logger.info(f"  Extracting chunk {idx+1}/{len(chunks)} from {filename}")
                 
+                if self.extractor_unavailable:
+                    self._add_to_retry_queue("memory", sub_key, "quota_exhausted")
+                    continue
+
                 # Proactive delay to avoid Groq Rate Limits
                 import time
                 if getattr(self.extractor_llm, "is_cloud", False):
@@ -298,29 +309,25 @@ class UnifiedPipeline:
                 start_time = time.time()
                 
                 try:
-                    chars_data = extractor.extract_characters(chunk_text, existing_characters=existing_chars)
-                    if chars_data.get("_parse_error"):
-                        self.metrics["chunks_failed"] += 1
-                        self._archive_raw_response("characters", sub_key, chars_data.get("_raw_text", ""))
-                        self._add_to_retry_queue("memory", sub_key, "characters_parse_failed")
-                        continue
-                    self.metrics["character_success"] += 1
+                    data = extractor.extract_all(chunk_text, existing_characters=existing_chars)
                     
-                    locs_data = extractor.extract_locations(chunk_text)
-                    if locs_data.get("_parse_error"):
+                    if data.get("_quota_exhausted"):
                         self.metrics["chunks_failed"] += 1
-                        self._archive_raw_response("locations", sub_key, locs_data.get("_raw_text", ""))
-                        self._add_to_retry_queue("memory", sub_key, "locations_parse_failed")
+                        self.metrics["extractor_quota_exhausted"] = True
+                        self.extractor_unavailable = True
+                        logger.warning(f"  ⚠️  Extractor quota exhausted on Chunk {idx+1}. Remaining chunks queued.")
+                        self._add_to_retry_queue("memory", sub_key, "quota_exhausted")
                         continue
-                    self.metrics["location_success"] += 1
-                    
-                    events_data = extractor.extract_events(chunk_text, existing_characters=existing_chars)
-                    if events_data.get("_parse_error"):
+                        
+                    if data.get("_parse_error"):
                         self.metrics["chunks_failed"] += 1
-                        self._archive_raw_response("events", sub_key, events_data.get("_raw_text", ""))
-                        self._add_to_retry_queue("memory", sub_key, "events_parse_failed")
+                        self._archive_raw_response("unified", sub_key, data.get("_raw_text", ""))
+                        self._add_to_retry_queue("memory", sub_key, "parse_failed")
                         continue
-                    self.metrics["event_success"] += 1
+                        
+                    self.metrics["character_success"] += 1 if data.get("characters") else 0
+                    self.metrics["location_success"] += 1 if data.get("locations") else 0
+                    self.metrics["event_success"] += 1 if data.get("events") else 0
                     
                     elapsed = time.time() - start_time
                     prev_avg = self.metrics["avg_extraction_latency"]
@@ -328,16 +335,8 @@ class UnifiedPipeline:
                     self.metrics["avg_extraction_latency"] = (prev_avg * n + elapsed) / (n + 1)
                     
                     self.metrics["chunks_processed"] += 1
-                    
-                    data = {
-                        "characters": chars_data.get("characters", []),
-                        "locations": locs_data.get("locations", []),
-                        "events": events_data.get("events", []),
-                        "relationships": events_data.get("relationships", []),
-                        "world_concepts": []
-                    }
 
-                    if not data["characters"] and not data["locations"] and not data["events"]:
+                    if not data.get("characters") and not data.get("locations") and not data.get("events"):
                         self.metrics["chunks_failed"] += 1
                         self._add_to_retry_queue("memory", sub_key, "extraction_returned_empty_data")
                         logger.warning(f"  ⚠️  Chunk {idx+1}/{len(chunks)} of {filename} returned empty extraction data.")
@@ -390,19 +389,19 @@ class UnifiedPipeline:
                 # Save world style from first chunk only if not already saved
                 style_file = os.path.join(self.pm.dirs["memory"], "world_style.txt")
                 if not world_style_saved and not os.path.exists(style_file):
-                    style = extractor.extract_world_style(chunk_text)
-                    if getattr(self.extractor_llm, "last_call_was_fallback", False):
+                    style = data.get("world_style", "")
+                    if style:
+                        with open(style_file, "w", encoding="utf-8") as f:
+                            f.write(style)
+                        world_style_saved = True
+                        logger.info(f"  World style: {style[:80]}…")
+                    elif getattr(self.extractor_llm, "last_call_was_fallback", False):
                         # Don't lock in a generic mock style for the whole project —
                         # retry this on the next run once the LLM is actually up.
                         logger.error(
                             "  ⚠️  World style extraction hit LLM fallback — "
                             "not saving, will retry on next run."
                         )
-                    else:
-                        with open(style_file, "w", encoding="utf-8") as f:
-                            f.write(style)
-                        world_style_saved = True
-                        logger.info(f"  World style: {style[:80]}…")
                 elif os.path.exists(style_file):
                     world_style_saved = True # Already exists, don't re-extract
                     if idx == 0:
