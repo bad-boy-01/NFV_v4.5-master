@@ -19,6 +19,10 @@ models:
     translation_model: "llama-3.3-70b-versatile"
     ollama_host: "http://localhost:11434"
     ollama_model: "qwen2.5:7b"   # Primary if provider is ollama
+    character_max_tokens: 1200
+    location_max_tokens: 800
+    event_max_tokens: 2000
+    scene_max_tokens: 2500
 
   # ── Image Generation ──────────────────────────────────────
   image:

@@ -21,16 +21,15 @@ class MemoryExtractor:
     def _gen_json(self, prompt: str, system: str, temperature: float = 0.1) -> str:
         return self.llm.generate_json(prompt, system_prompt=system, temperature=temperature)
 
-    def extract_all(self, text: str, existing_characters: list = None,
-                    existing_relationships: list = None) -> Dict:
-        """Extract all entity types from a text chunk in one structured call."""
-        existing_names = [c.get("canonical_name", "") for c in (existing_characters or [])]
-        known = ", ".join(existing_names) if existing_names else "none yet"
+    def extract_characters(self, text: str, existing_characters: list = None) -> Dict:
+        existing_names = [c.get("canonical_name", "") for c in (existing_characters or []) if c.get("canonical_name")]
+        relevant_names = [n for n in existing_names if n.lower() in text.lower()]
+        known = ", ".join(relevant_names) if relevant_names else "none yet"
 
         system = (
             "You are a visual character extractor for a Korean manhwa AI pipeline. "
-            "Extract ALL named entities AND narrative events from the following text. "
-            f"Known characters already in the database: [{known}]. "
+            "Extract ALL named characters from the following text. "
+            f"Relevant known characters already in the database: [{known}]. "
             "For new characters, extract static visual DNA as booru-style tags. "
             "For ALL characters (new and existing), extract their CURRENT dynamic state (outfit, injuries, emotion). "
             "Output ONLY valid JSON with this structure:\n"
@@ -38,25 +37,65 @@ class MemoryExtractor:
             '"subject": "1boy or 1girl", "age": "e.g. 20 years old, teenager, ancient", '
             '"hair": "black short hair", "eyes": "sharp brown eyes", "build": "athletic", '
             '"clothing": "white martial arts robe", "accessories": ""}, '
-            '"current_state": {"outfit": "torn white robe", "injuries": "bleeding cheek", "emotion": "angry"}}], '
-            '"locations": [{"canonical_name": "Name", "description": "brief", '
-            '"visual_tags": "stone courtyard, ancient pillars, morning mist"}], '
-            '"events": [{"summary": "Brief description of the action", '
+            '"current_state": {"outfit": "torn white robe", "injuries": "bleeding cheek", "emotion": "angry"}}]} '
+            "Return empty array if nothing found. NO extra text outside the JSON."
+        )
+        prompt = text[:3000]
+        logger.info(f"  [Compression] Characters: {len(existing_names)} total -> {len(relevant_names)} relevant. Prompt length: {len(prompt)} chars.")
+        
+        max_t = self.config.get("models", {}).get("llm", {}).get("character_max_tokens", 1200)
+        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.1, max_tokens=max_t)
+        try:
+            return json.loads(result)
+        except Exception as e:
+            logger.warning(f"extract_characters JSON parse failed: {e}")
+            return {"_parse_error": True, "_raw_text": result}
+
+    def extract_locations(self, text: str) -> Dict:
+        system = (
+            "You are a visual location extractor for a Korean manhwa AI pipeline. "
+            "Extract ALL locations from the following text. "
+            "Output ONLY valid JSON with this structure:\n"
+            '{"locations": [{"canonical_name": "Name", "description": "brief", '
+            '"visual_tags": "stone courtyard, ancient pillars, morning mist"}]} '
+            "Return empty array if nothing found. NO extra text outside the JSON."
+        )
+        max_t = self.config.get("models", {}).get("llm", {}).get("location_max_tokens", 800)
+        result = self.llm.generate_json(text[:3000], system_prompt=system, temperature=0.1, max_tokens=max_t)
+        try:
+            return json.loads(result)
+        except Exception as e:
+            logger.warning(f"extract_locations JSON parse failed: {e}")
+            return {"_parse_error": True, "_raw_text": result}
+
+    def extract_events(self, text: str, existing_characters: list = None) -> Dict:
+        existing_names = [c.get("canonical_name", "") for c in (existing_characters or []) if c.get("canonical_name")]
+        relevant_names = [n for n in existing_names if n.lower() in text.lower()]
+        known = ", ".join(relevant_names) if relevant_names else "none yet"
+
+        system = (
+            "You are a narrative event extractor for a Korean manhwa AI pipeline. "
+            "Extract ALL narrative events, actions, and relationships from the text. "
+            f"Relevant known characters: [{known}]. "
+            "Output ONLY valid JSON with this structure:\n"
+            '{"events": [{"summary": "Brief description of the action", '
             '"importance": 8, "involved_characters": ["Name1", "Name2"], '
             '"location": "Name"}], '
-            '"world_concepts": [{"concept_type": "power_system", "name": "Qi Cultivation", '
-            '"description": "cultivators absorb spiritual energy"}], '
             '"relationships": [{"char1": "Name1", "char2": "Name2", "type": "rivals", '
             '"description": "brief context"}]} '
             "Note: 'importance' is a 1-10 scale where 10 is a major battle or plot twist. "
             "Return empty arrays if nothing found. NO extra text outside the JSON."
         )
-        result = self._gen_json(text[:3000], system)
+        prompt = text[:3000]
+        logger.info(f"  [Compression] Events: {len(existing_names)} total -> {len(relevant_names)} relevant. Prompt length: {len(prompt)} chars.")
+
+        max_t = self.config.get("models", {}).get("llm", {}).get("event_max_tokens", 2000)
+        result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.1, max_tokens=max_t)
         try:
             return json.loads(result)
         except Exception as e:
-            logger.warning(f"extract_all JSON parse failed: {e}")
-        return {"characters": [], "locations": [], "world_concepts": [], "relationships": []}
+            logger.warning(f"extract_events JSON parse failed: {e}")
+            return {"_parse_error": True, "_raw_text": result}
 
     def extract_world_style(self, text: str) -> str:
         """Extract a short visual style string for consistent art direction."""

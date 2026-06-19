@@ -30,3 +30,14 @@ To ensure you can successfully resume your project at any time, please verify th
 *   **Checkpoints File**: Tracks the completion status of every file and stage.
 *   **Clips Master Plan**: The `clips.json` file in the output directory, which serves as the blueprint for the entire video.
 *   **Asset Folders**: The `images` and `audio` directories containing all generated media.
+import os
+from kaggle_secrets import UserSecretsClient
+
+user_secrets = UserSecretsClient()
+secret_value_0 = user_secrets.get_secret("GROQ_API_KEY")
+
+os.environ["GROQ_API_KEY"] = secret_value_0
+print("✓ GROQ_API_KEY added to environment!")
+!git clone https://github.com/bad-boy-01/NFV_v4.5-master.git
+%cd NFV_v4.5-master
+!python start_pipeline.py --input projects/novel/input/chapter1.txt

@@ -59,7 +59,7 @@ class GroqLLMAdapter:
         return bool(self.api_key)
 
     def generate(self, prompt: str, system_prompt: str = None,
-                 temperature: float = 0.7, model: str = None, **kwargs) -> str:
+                 temperature: float = 0.7, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
         if not self.api_key:
             return "ERROR: GROQ_NO_API_KEY"
 
@@ -77,7 +77,7 @@ class GroqLLMAdapter:
                     json={"model": model or self.model_name,
                           "messages": messages,
                           "temperature": temperature,
-                          "max_tokens": 4096},
+                          "max_tokens": max_tokens},
                     timeout=120,
                 )
                 if r.status_code == 429:
@@ -97,7 +97,7 @@ class GroqLLMAdapter:
         return "ERROR: GROQ_FAILED"
 
     def generate_json(self, prompt: str, system_prompt: str = None,
-                      temperature: float = 0.1, model: str = None, **kwargs) -> str:
+                      temperature: float = 0.1, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
         """Force JSON response format if supported, then repair."""
         # Note: Groq supports response_format={"type": "json_object"} for some models
         messages = []
@@ -114,7 +114,7 @@ class GroqLLMAdapter:
                       "messages": messages,
                       "temperature": temperature,
                       "response_format": {"type": "json_object"},
-                      "max_tokens": 1500},
+                      "max_tokens": max_tokens},
                 timeout=120,
             )
             r.raise_for_status()
@@ -166,7 +166,7 @@ class DeepSeekLLMAdapter:
         return bool(self.api_key)
 
     def generate(self, prompt: str, system_prompt: str = None,
-                 temperature: float = 0.7, model: str = None, **kwargs) -> str:
+                 temperature: float = 0.7, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
         if not self.api_key:
             return "ERROR: DEEPSEEK_NO_API_KEY"
 
@@ -184,7 +184,7 @@ class DeepSeekLLMAdapter:
                     json={"model": model or self.model_name,
                           "messages": messages,
                           "temperature": temperature,
-                          "max_tokens": 4096},
+                          "max_tokens": max_tokens},
                     timeout=120,
                 )
                 if r.status_code == 429:
@@ -203,7 +203,7 @@ class DeepSeekLLMAdapter:
         return "ERROR: DEEPSEEK_FAILED"
 
     def generate_json(self, prompt: str, system_prompt: str = None,
-                      temperature: float = 0.1, model: str = None, **kwargs) -> str:
+                      temperature: float = 0.1, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt + " You must output valid JSON."})
@@ -218,7 +218,7 @@ class DeepSeekLLMAdapter:
                       "messages": messages,
                       "temperature": temperature,
                       "response_format": {"type": "json_object"},
-                      "max_tokens": 4096},
+                      "max_tokens": max_tokens},
                 timeout=120,
             )
             r.raise_for_status()
@@ -304,25 +304,17 @@ class SmartLLMAdapter:
     def _handle_exhausted(self, system_prompt: str, prompt: str) -> str:
         """
         Called only when every real provider has failed for this request.
-        Centralizes strict_mode/fallback-counting so generate() and
-        generate_json() can't drift out of sync with each other.
         """
         self.fallback_count += 1
         self.last_call_was_fallback = True
-        if self.strict_mode:
-            raise LLMFallbackExhausted(
-                f"All LLM providers failed (strict_mode=True). "
-                f"system_prompt[:60]={system_prompt[:60]!r} prompt[:60]={prompt[:60]!r}"
-            )
         logger.error(
             f"⚠️  LLM FALLBACK #{self.fallback_count}: both providers failed — "
-            f"returning MOCK content, not real story content. "
-            f"system_prompt[:60]={system_prompt[:60]!r}"
+            f"raising LLMFallbackExhausted. "
         )
-        return _mock_response(system_prompt or "", prompt)
+        raise LLMFallbackExhausted(f"All LLM providers failed. system_prompt[:60]={system_prompt[:60]!r}")
 
     def generate(self, prompt: str, system_prompt: str = None,
-                 temperature: float = 0.7, model: str = None, **kwargs) -> str:
+                 temperature: float = 0.7, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
         self.total_calls += 1
         self.last_call_was_fallback = False
 
@@ -350,7 +342,7 @@ class SmartLLMAdapter:
         return result
 
     def generate_json(self, prompt: str, system_prompt: str = None,
-                      temperature: float = 0.1, model: str = None, **kwargs) -> str:
+                      temperature: float = 0.1, model: str = None, max_tokens: int = 4096, **kwargs) -> str:
         """Tries primary, then fallback, with JSON-specific logic."""
         self.total_calls += 1
         self.last_call_was_fallback = False
@@ -381,81 +373,3 @@ class SmartLLMAdapter:
             self._primary.unload_model(model_name)
 
 
-# ── Schema-valid mock responses (when no LLM is available) ──────────────────
-def _mock_response(system_prompt: str, prompt: str) -> str:
-    sl = system_prompt.lower()
-
-    # Memory extractor: "extract ALL named entities" / "visual character extractor"
-    if any(k in sl for k in ["information extraction", "ie engine", "structured prompt",
-                               "extract all", "visual dna", "named entities",
-                               "visual character extractor", "knowledge store"]):
-        return json.dumps({
-            "_mock_fallback": True,
-            "characters": [{"canonical_name": "Hero",
-                            "visual_dna": {"hair": "black hair",
-                                           "eyes": "brown eyes", "build": "athletic build"}}],
-            "locations": [{"canonical_name": "Training Grounds",
-                           "description": "open field, stone pillars, morning mist",
-                           "visual_tags": "open field, stone pillars, morning mist, warm light"}],
-            "world_concepts": [{"concept_type": "power_system", "name": "Martial Arts",
-                                 "description": "physical training and combat techniques"}],
-            "relationships": [{"char1": "Hero", "char2": "Master",
-                                "type": "mentor", "description": "student and teacher"}],
-        })
-
-    # Scene planner (showrunner): "korean manhwa storyboard showrunner"
-    if any(k in sl for k in ["film showrunner", "narrative scene", "showrunner",
-                               "narrative beats", "divide them into", "storyboard showrunner",
-                               "visual scenes", "story text into visual"]):
-        # Extract some real text from prompt for narration if possible
-        narration = prompt[:120].strip() if prompt else "The story continues."
-        return json.dumps([{
-            "scene_id": "SC001",
-            "_mock_fallback": True,
-            "location": "Training Grounds",
-            "characters": ["Hero"],
-            "emotion": "focused",
-            "action": "Hero trains intensely under the morning sun",
-            "camera_angle": "medium shot",
-            "lighting": "warm morning sunlight, dramatic shadows",
-            "visual_prompt_tags": "training, sweat, determination, morning light, stone pillars",
-            "narration_text": narration,
-            "complexity": 5,
-        }])
-
-    # Shot director: "film director" / "cinematic shots"
-    if any(k in sl for k in ["film director", "cinematic shots", "break this",
-                               "visual shots", "cinematic shot"]):
-        return json.dumps([{
-            "shot_id": "SH001_A",
-            "camera": "medium shot",
-            "visual_prompt_tags": ("training, sweat, determination, morning sunlight, "
-                                   "stone pillars, dust particles"),
-            "negative_prompt_tags": "lowres, bad anatomy, blurry",
-            "narration_text": "Every day, he pushed his limits further.",
-            "duration_estimate": 7.0,
-        }])
-
-    # World style: "art director" / "visual aesthetic"
-    if any(k in sl for k in ["world style", "atmosphere", "storyboard artist",
-                               "visual atmosphere", "art director", "visual aesthetic",
-                               "booru tags", "comma-separated tags"]):
-        return "martial arts world, ancient Asian architecture, stone courtyards, misty mountains"
-
-    # Translation
-    if any(k in sl for k in ["translate", "translation", "literary translator"]):
-        return prompt  # pass-through
-
-    # SEO / publishing
-    if any(k in sl for k in ["seo", "metadata", "youtube", "title", "youtube seo"]):
-        return json.dumps({
-            "title": "Epic Novel Adaptation — Manhwa Style",
-            "description": "Watch the story unfold in stunning Korean manhwa style.",
-            "tags": ["manhwa", "novel", "animation", "webtoon", "korean"],
-        })
-
-    # Language detection
-    if any(k in sl for k in ["english", "language", "detect", "analyze the language"]):
-        return "ENGLISH"
-
-    return f"Mock response: {prompt[:60]}"

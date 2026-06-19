@@ -75,7 +75,56 @@ class UnifiedPipeline:
         self._image_gen = None
         self._audio_gen = None
 
+        self.metrics = {
+            "chunks_processed": 0,
+            "chunks_failed": 0,
+            "character_success": 0,
+            "location_success": 0,
+            "event_success": 0,
+            "groq_429_count": 0,
+            "llm_failures": 0,
+            "avg_latency": 0,
+            "avg_tokens": 0
+        }
+
         logger.info(f"Pipeline ready for project: {project_name}")
+
+    def _archive_raw_response(self, stage: str, chunk_id: str, raw_text: str):
+        raw_dir = os.path.join(self.pm.dirs["output"], "raw_llm")
+        os.makedirs(raw_dir, exist_ok=True)
+        filename = f"{chunk_id}_{stage}_raw.txt"
+        with open(os.path.join(raw_dir, filename), "w", encoding="utf-8") as f:
+            f.write(str(raw_text))
+
+    def _add_to_retry_queue(self, stage: str, chunk_id: str, reason: str):
+        queue_path = os.path.join(self.pm.dirs["output"], "retry_queue.json")
+        queue = []
+        if os.path.exists(queue_path):
+            with open(queue_path, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+        
+        # Check if already in queue
+        for item in queue:
+            if item["chunk_id"] == chunk_id and item["stage"] == stage:
+                item["attempts"] += 1
+                item["reason"] = reason
+                break
+        else:
+            queue.append({
+                "chunk_id": chunk_id,
+                "stage": stage,
+                "reason": reason,
+                "attempts": 1
+            })
+            
+        with open(queue_path, "w", encoding="utf-8") as f:
+            json.dump(queue, f, indent=2)
+
+    def _save_metrics(self):
+        metrics_path = os.path.join(self.pm.project_dir, "artifacts", "run_metrics.json")
+        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+        with open(metrics_path, "w", encoding="utf-8") as f:
+            json.dump(self.metrics, f, indent=2)
 
     # ── Lazy adapters ─────────────────────────────────────────────────────────
     @property
@@ -132,6 +181,7 @@ class UnifiedPipeline:
         self.stage_audio()
         self.stage_video()
         self.stage_export()
+        self._save_metrics()
         logger.info("✅ Full pipeline complete!")
 
     def import_source(self, source_file: str):
@@ -226,21 +276,46 @@ class UnifiedPipeline:
                     time.sleep(5)
 
                 existing_chars = self.memory_db.get_all_characters()
-                existing_rels = self.memory_db.get_all_relationships()
-                data = extractor.extract_all(chunk_text,
-                                             existing_characters=existing_chars,
-                                             existing_relationships=existing_rels)
-
-                if data.get("_mock_fallback"):
-                    # Both LLM providers failed for this chunk. Previously this
-                    # silently wrote a fake "Hero" character and "Training Grounds"
-                    # location into the permanent memory DB. Now: skip the merge,
-                    # leave this chunk's checkpoint unset so the NEXT run retries
-                    # it automatically, and make the failure impossible to miss.
-                    logger.error(
-                        f"  ⚠️  Chunk {idx+1}/{len(chunks)} of {filename}: LLM fallback fired — "
-                        f"skipping merge (no fake entities written), will retry on next run."
-                    )
+                
+                try:
+                    chars_data = extractor.extract_characters(chunk_text, existing_characters=existing_chars)
+                    if chars_data.get("_parse_error"):
+                        self.metrics["chunks_failed"] += 1
+                        self._archive_raw_response("characters", sub_key, chars_data.get("_raw_text", ""))
+                        self._add_to_retry_queue("memory", sub_key, "characters_parse_failed")
+                        continue
+                    self.metrics["character_success"] += 1
+                    
+                    locs_data = extractor.extract_locations(chunk_text)
+                    if locs_data.get("_parse_error"):
+                        self.metrics["chunks_failed"] += 1
+                        self._archive_raw_response("locations", sub_key, locs_data.get("_raw_text", ""))
+                        self._add_to_retry_queue("memory", sub_key, "locations_parse_failed")
+                        continue
+                    self.metrics["location_success"] += 1
+                    
+                    events_data = extractor.extract_events(chunk_text, existing_characters=existing_chars)
+                    if events_data.get("_parse_error"):
+                        self.metrics["chunks_failed"] += 1
+                        self._archive_raw_response("events", sub_key, events_data.get("_raw_text", ""))
+                        self._add_to_retry_queue("memory", sub_key, "events_parse_failed")
+                        continue
+                    self.metrics["event_success"] += 1
+                    
+                    self.metrics["chunks_processed"] += 1
+                    
+                    data = {
+                        "characters": chars_data.get("characters", []),
+                        "locations": locs_data.get("locations", []),
+                        "events": events_data.get("events", []),
+                        "relationships": events_data.get("relationships", []),
+                        "world_concepts": []
+                    }
+                except Exception as e:
+                    self.metrics["chunks_failed"] += 1
+                    self.metrics["llm_failures"] += 1
+                    logger.error(f"  ⚠️  Chunk {idx+1}/{len(chunks)} of {filename} failed: {e}")
+                    self._add_to_retry_queue("memory", sub_key, f"Exception: {str(e)[:50]}")
                     continue
 
                 for c in data.get("characters", []):
@@ -467,49 +542,51 @@ class UnifiedPipeline:
                 best_scenes = []
                 best_coverage = 0.0
                 
-                for attempt in range(3):
-                    chunk_scenes = planner.plan_scenes(chunk_text, chunk_chapter, events=chunk_events)
-                    
-                    # V5: CoverageValidator.validate() returns True if passes, False if fails
-                    is_covered = coverage_validator.validate(chunk_text, chunk_scenes)
-                    
-                    if is_covered:
-                        best_scenes = chunk_scenes
-                        break
+                try:
+                    for attempt in range(3):
+                        chunk_scenes = planner.plan_scenes(chunk_text, chunk_chapter, events=chunk_events)
+                        if not chunk_scenes:
+                            continue
+                            
+                        # V5: CoverageValidator.validate() returns True if passes, False if fails
+                        is_covered = coverage_validator.validate(chunk_text, chunk_scenes)
                         
-                    # Early exit is trickier now as we don't have the explicit ratio,
-                    # but we can rely on the validator to log the issue.
-                    time.sleep(2)
-                
-                chunk_scenes = best_scenes
-                
-                # V5: The simplified loop now populates best_scenes and is_covered.
-                # We need to map this to the variables the rest of the function expects.
-                scenes = best_scenes or []
-                is_mock = any(s.get("_mock_fallback") for s in scenes)
-                
-                # Check coverage status
-                best_coverage_ok = coverage_validator.validate(chunk_text, scenes)
-                best_is_mock = is_mock
+                        if is_covered:
+                            best_scenes = chunk_scenes
+                            break
+                            
+                        time.sleep(2)
+                    
+                    chunk_scenes = best_scenes
+                    scenes = best_scenes or []
+                    
+                    if not scenes:
+                        self.metrics["chunks_failed"] += 1
+                        self._add_to_retry_queue("visual_planning", chunk_key, "scenes_empty_or_failed")
+                        logger.error(
+                            f"  ⚠️  Chunk {i+1}/{len(chunks)} (~ch{chunk_chapter}, "
+                            f"\"{chunk_text[:60]}…\"): LLM failed to produce valid scenes. "
+                            f"Skipping — will retry on next run."
+                        )
+                        failed_chunks.append({
+                            "file": filename, "chunk_index": i + 1, "chapter": chunk_chapter,
+                            "preview": chunk_text[:120],
+                        })
+                        continue
 
-                if best_is_mock:
-                    # Every attempt for this chunk hit the LLM fallback. Do not let
-                    # fabricated "Hero"/"Training Grounds" content into the real
-                    # video — drop this chunk's contribution entirely and don't
-                    # mark it complete, so a future run (once Groq/Ollama are back)
-                    # retries it automatically instead of permanently losing this
-                    # part of the story.
-                    logger.error(
-                        f"  ⚠️  Chunk {i+1}/{len(chunks)} (~ch{chunk_chapter}, "
-                        f"\"{chunk_text[:60]}…\"): every attempt hit the LLM fallback. "
-                        f"Skipping — will retry on next run instead of inserting fake content."
-                    )
+                    best_coverage_ok = coverage_validator.validate(chunk_text, scenes)
+                except Exception as e:
+                    self.metrics["chunks_failed"] += 1
+                    self.metrics["llm_failures"] += 1
+                    self._add_to_retry_queue("visual_planning", chunk_key, f"Exception: {str(e)[:50]}")
+                    logger.error(f"  ⚠️  Chunk {i+1}/{len(chunks)} failed with exception: {e}")
                     failed_chunks.append({
                         "file": filename, "chunk_index": i + 1, "chapter": chunk_chapter,
                         "preview": chunk_text[:120],
                     })
                     continue
-                elif not best_coverage_ok:
+                
+                if not best_coverage_ok:
                     logger.warning(
                         f"    Chunk {i+1}: using real but under-coverage content "
                         f"(better than discarding genuine narration)."

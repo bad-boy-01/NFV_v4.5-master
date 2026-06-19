@@ -41,7 +41,8 @@ class ScenePlanner:
             f"{events_context}"
         )
 
-        response = self.llm.generate_json(text_chunk, system_prompt=system, temperature=0.2)
+        max_t = self.config.get("models", {}).get("llm", {}).get("scene_max_tokens", 2500)
+        response = self.llm.generate_json(text_chunk, system_prompt=system, temperature=0.2, max_tokens=max_t)
         
         try:
             scenes = json.loads(response)
@@ -57,12 +58,12 @@ class ScenePlanner:
             scenes = []
 
         if not scenes:
-            logger.warning("Scene planner returned empty — creating fallback scene")
-            scenes = [self._fallback_scene(text_chunk, chapter)]
+            logger.warning("Scene planner returned empty or parse failed. Returning empty list to trigger retry.")
+            return []
 
         # Ensure all required fields are present
         for sc in scenes:
-            sc.setdefault("location", "Unknown Location")
+            sc.setdefault("location", "Unknown")
             sc.setdefault("characters", [])
             sc.setdefault("emotion", "neutral")
             sc.setdefault("action", "continuation")
@@ -74,17 +75,3 @@ class ScenePlanner:
 
         return scenes
 
-    def _fallback_scene(self, text: str, chapter: int) -> Dict:
-        sentences = [s.strip() for s in text.split(".") if s.strip()]
-        narration = ". ".join(sentences[:3]) + "." if sentences else text[:200]
-        return {
-            "location": "Unknown",
-            "characters": [],
-            "emotion": "neutral",
-            "action": "Story continues",
-            "camera_angle": "medium shot",
-            "lighting": "natural daylight",
-            "visual_prompt_tags": "interior scene, detailed background",
-            "narration_text": narration,
-            "complexity": 5,
-        }
