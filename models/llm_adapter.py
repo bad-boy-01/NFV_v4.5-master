@@ -506,18 +506,16 @@ class SmartLLMAdapter:
 
         if "ERROR:" in result:
             logger.warning(f"Primary LLM failed ({result}). Trying fallback...")
-            # If Groq failed, try DeepSeek or Gemini
-            if self._primary == self._groq:
-                if self._deepseek.check_health():
-                    result = self._deepseek.generate(
+            # If primary failed, try other available providers
+            for fallback in [self._groq, self._gemini, self._deepseek, self._ollama]:
+                if fallback and fallback != self._primary and fallback.check_health():
+                    logger.info(f"LLM Fallback: Trying {fallback.__class__.__name__}")
+                    result = fallback.generate(
                         prompt, system_prompt=system_prompt,
                         temperature=temperature, model=model, **kwargs
                     )
-                elif self._gemini.check_health():
-                    result = self._gemini.generate(
-                        prompt, system_prompt=system_prompt,
-                        temperature=temperature, model=model, **kwargs
-                    )
+                    if "ERROR:" not in result:
+                        break
 
             if "ERROR:" in result:
                 return self._handle_exhausted(system_prompt or "", prompt)
@@ -540,17 +538,16 @@ class SmartLLMAdapter:
 
         if "ERROR:" in result:
             logger.warning(f"Primary LLM JSON failed ({result}). Trying fallback...")
-            if self._primary == self._groq:
-                if self._deepseek.check_health():
-                    result = self._deepseek.generate_json(
+            # If primary failed, try other available providers
+            for fallback in [self._groq, self._gemini, self._deepseek, self._ollama]:
+                if fallback and fallback != self._primary and fallback.check_health():
+                    logger.info(f"LLM JSON Fallback: Trying {fallback.__class__.__name__}")
+                    result = fallback.generate_json(
                         prompt, system_prompt=system_prompt,
                         temperature=temperature, model=model, **kwargs
                     )
-                elif self._gemini.check_health():
-                    result = self._gemini.generate_json(
-                        prompt, system_prompt=system_prompt,
-                        temperature=temperature, model=model, **kwargs
-                    )
+                    if "ERROR:" not in result:
+                        break
 
             if "ERROR:" in result:
                 return self._handle_exhausted(system_prompt or "", prompt)
