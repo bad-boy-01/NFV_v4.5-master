@@ -183,9 +183,11 @@ class UnifiedPipeline:
             self.import_source(source_file)
             
         if not getattr(self.extractor_llm, "is_available", True):
-            logger.error("🛑 CRITICAL: No LLM provider is reachable. The pipeline cannot run.")
-            logger.error("   → If using Ollama (local): Ensure the server is running (`ollama serve`).")
-            logger.error("   → If using Groq (cloud): Ensure GROQ_API_KEY is set in your environment.")
+            logger.error("🛑 CRITICAL: Extractor LLM provider is unreachable.")
+            return
+
+        if not getattr(self.planner_llm, "is_available", True):
+            logger.error("🛑 CRITICAL: Planner LLM provider is unreachable.")
             return
             
         self.stage_translate()
