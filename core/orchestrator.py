@@ -199,6 +199,12 @@ class UnifiedPipeline:
             
         self.stage_translate()
         self.stage_memory()
+        
+        if self.metrics.get("extractor_quota_exhausted"):
+            logger.error("🛑 CRITICAL: Memory extraction incomplete due to LLM quota exhaustion.")
+            logger.error("🛑 Pipeline aborted to prevent generating severely degraded output.")
+            return
+            
         self.stage_character_sheets()
         self.stage_visual_planning()
         self.stage_generation()
@@ -292,11 +298,13 @@ class UnifiedPipeline:
                     continue
 
                 chunk_text = " ".join(s["text"] for s in chunk_data["sentences"])
-                logger.info(f"  Extracting chunk {idx+1}/{len(chunks)} from {filename}")
                 
                 if self.extractor_unavailable:
+                    logger.info(f"  ⏭️ Skipping chunk {idx+1}/{len(chunks)} from {filename} (quota exhausted)")
                     self._add_to_retry_queue("memory", sub_key, "quota_exhausted")
                     continue
+
+                logger.info(f"  Extracting chunk {idx+1}/{len(chunks)} from {filename}")
 
                 # Proactive delay to avoid Groq Rate Limits
                 import time
