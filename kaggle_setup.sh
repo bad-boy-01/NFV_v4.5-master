@@ -17,8 +17,12 @@ if [ -f /etc/ImageMagick-6/policy.xml ]; then
     sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml
 fi
 
-# 2. Skip Ollama
-echo "[2/5] Skipping Ollama setup as per user request..."
+# 2. Install and Start Ollama
+echo "[2/5] Installing and starting Ollama..."
+curl -fsSL https://ollama.com/install.sh | sh
+nohup ollama serve > ollama.log 2>&1 &
+sleep 5
+ollama pull qwen3:8b
 
 # 3. Python packages
 echo "[3/5] Installing Python packages..."
