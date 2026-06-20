@@ -24,7 +24,7 @@ models:
     translation_model: "llama-3.1-8b-instant"
     deepseek_model: "deepseek-chat"
     ollama_host: "http://localhost:11434"
-    ollama_model: "qwen3:8b"   # Use 7b/8b for extraction to save VRAM
+    ollama_model: "qwen2.5:7b"   # Use 7b/8b for extraction to save VRAM
     character_max_tokens: 1200
     location_max_tokens: 800
     event_max_tokens: 2000

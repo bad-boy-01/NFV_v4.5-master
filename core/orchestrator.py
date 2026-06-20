@@ -383,6 +383,9 @@ class UnifiedPipeline:
                         rel.get("type", "other"), rel.get("description", ""),
                     )
                 for event in data.get("events", []):
+                    if not isinstance(event, dict):
+                        logger.warning(f"  ⚠️  Invalid event format: {event}")
+                        continue
                     inv_chars = event.get("involved_characters", [])
                     if isinstance(inv_chars, list):
                         inv_chars = ", ".join(inv_chars)

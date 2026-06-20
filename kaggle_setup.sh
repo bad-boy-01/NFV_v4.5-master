@@ -22,7 +22,7 @@ echo "[2/5] Installing and starting Ollama..."
 curl -fsSL https://ollama.com/install.sh | sh
 nohup ollama serve > ollama.log 2>&1 &
 sleep 5
-ollama pull qwen3:8b
+ollama pull qwen2.5:7b
 
 # 3. Python packages
 echo "[3/5] Installing Python packages..."
