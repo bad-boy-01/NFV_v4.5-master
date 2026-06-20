@@ -17,7 +17,7 @@ models:
     # Fallback: Groq free-tier (sign up FREE at console.groq.com)
     extractor_provider: "ollama"       # "gemini" | "ollama" | "groq" | "deepseek"
     extractor_allow_fallback: false
-    planner_provider: "groq"
+    planner_provider: "ollama"
     planner_allow_fallback: true
     translation_provider: "groq"
     
