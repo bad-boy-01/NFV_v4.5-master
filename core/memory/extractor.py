@@ -75,6 +75,19 @@ class MemoryExtractor:
         try:
             parsed = json.loads(result)
             parsed["_parse_error"] = False
+            if "events" in parsed and isinstance(parsed["events"], list):
+                clean_events = []
+                for e in parsed["events"]:
+                    if isinstance(e, dict):
+                        clean_events.append(e)
+                    elif isinstance(e, str):
+                        clean_events.append({
+                            "summary": e,
+                            "involved_characters": [],
+                            "location": "",
+                            "description": ""
+                        })
+                parsed["events"] = clean_events
             return parsed
         except Exception as e:
             logger.warning(f"extract_all JSON parse failed: {e}")
@@ -178,7 +191,21 @@ class MemoryExtractor:
         max_t = self.config.get("models", {}).get("llm", {}).get("event_max_tokens", 2000)
         result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.0, max_tokens=max_t)
         try:
-            return json.loads(result)
+            parsed = json.loads(result)
+            if "events" in parsed and isinstance(parsed["events"], list):
+                clean_events = []
+                for e in parsed["events"]:
+                    if isinstance(e, dict):
+                        clean_events.append(e)
+                    elif isinstance(e, str):
+                        clean_events.append({
+                            "summary": e,
+                            "involved_characters": [],
+                            "location": "",
+                            "description": ""
+                        })
+                parsed["events"] = clean_events
+            return parsed
         except Exception as e:
             logger.warning(f"extract_events JSON parse failed: {e}")
             return {"_parse_error": True, "_raw_text": result}
