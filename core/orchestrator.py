@@ -415,13 +415,28 @@ class UnifiedPipeline:
                     if not isinstance(event, dict):
                         logger.warning(f"  ⚠️  Invalid event format: {event}")
                         continue
-                    inv_chars = event.get("involved_characters") or event.get("characters", [])
-                    if isinstance(inv_chars, list):
-                        inv_chars = ", ".join(inv_chars)
+                    
+                    raw_chars = event.get("involved_characters") or event.get("characters", [])
+                    extracted_names = []
+                    
+                    if isinstance(raw_chars, str):
+                        extracted_names = [n.strip() for n in raw_chars.split(",")]
+                    elif isinstance(raw_chars, list):
+                        for item in raw_chars:
+                            if isinstance(item, str):
+                                extracted_names.append(item.strip())
+                            elif isinstance(item, dict):
+                                name = item.get("name") or item.get("canonical_name", "")
+                                if name and isinstance(name, str):
+                                    extracted_names.append(name.strip())
+                                    
+                    extracted_names = [n for n in extracted_names if n]
+                    inv_chars_str = ", ".join(extracted_names)
+
                     self.memory_db.add_event(
                         summary=event.get("summary", ""),
                         importance=event.get("importance", 5),
-                        involved_characters=inv_chars,
+                        involved_characters=inv_chars_str,
                         location=event.get("location", ""),
                         source_chunk=sub_key
                     )
