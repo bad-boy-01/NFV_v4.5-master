@@ -13,7 +13,7 @@ models:
   llm:
     # Primary: Groq local (qwen2.5:7b) - recommended to avoid Groq rate limits
     # Fallback: Groq free-tier (sign up FREE at console.groq.com)
-    extractor_provider: "groq"       # "gemini" | "ollama" | "groq"
+    extractor_provider: "deepseek"       # "gemini" | "ollama" | "groq" | "deepseek"
     extractor_allow_fallback: false
     planner_provider: "groq"
     planner_allow_fallback: true
@@ -22,6 +22,7 @@ models:
     model: "llama-3.3-70b-versatile"   # Groq free model
     planning_model: "llama-3.3-70b-versatile"
     translation_model: "llama-3.3-70b-versatile"
+    deepseek_model: "deepseek-chat"
     ollama_host: "http://localhost:11434"
     ollama_model: "qwen2.5:7b"   # Use 7b/8b for extraction to save VRAM
     character_max_tokens: 1200

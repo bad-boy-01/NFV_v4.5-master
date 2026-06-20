@@ -63,7 +63,7 @@ class MemoryExtractor:
             '  "world_style": ""\n'
             "}"
         )
-        prompt = f"TEXT:\n\n{text[:3000]}"
+        prompt = f"TEXT:\n\n{text[:2500]}"
         logger.info(f"  [Compression] Unified Extraction. Prompt length: {len(prompt)} chars.")
 
         max_t = self.config.get("models", {}).get("llm", {}).get("event_max_tokens", 3000)
@@ -107,7 +107,7 @@ class MemoryExtractor:
             "  ]\n"
             "}"
         )
-        prompt = f"TEXT:\n\n{text[:3000]}"
+        prompt = f"TEXT:\n\n{text[:2500]}"
         logger.info(f"  [Compression] Characters: {len(existing_names)} total -> {len(relevant_names)} relevant. Prompt length: {len(prompt)} chars.")
         
         max_t = self.config.get("models", {}).get("llm", {}).get("character_max_tokens", 1200)
@@ -137,7 +137,7 @@ class MemoryExtractor:
             "  ]\n"
             "}"
         )
-        prompt = f"TEXT:\n\n{text[:3000]}"
+        prompt = f"TEXT:\n\n{text[:2500]}"
         max_t = self.config.get("models", {}).get("llm", {}).get("location_max_tokens", 800)
         result = self.llm.generate_json(prompt, system_prompt=system, temperature=0.0, max_tokens=max_t)
         try:
@@ -172,7 +172,7 @@ class MemoryExtractor:
             "  ]\n"
             "}"
         )
-        prompt = f"TEXT:\n\n{text[:3000]}"
+        prompt = f"TEXT:\n\n{text[:2500]}"
         logger.info(f"  [Compression] Events: {len(existing_names)} total -> {len(relevant_names)} relevant. Prompt length: {len(prompt)} chars.")
 
         max_t = self.config.get("models", {}).get("llm", {}).get("event_max_tokens", 2000)
@@ -193,6 +193,6 @@ class MemoryExtractor:
             "or 'modern Seoul, neon lights, urban fantasy, rainy streets'. "
             "Output ONLY the comma-separated tags, nothing else."
         )
-        result = self._gen(text[:1500], system)
+        result = self._gen(text[:1000], system)
         tags = result.strip().strip("`").split("\n")[0].strip()
         return tags[:300]

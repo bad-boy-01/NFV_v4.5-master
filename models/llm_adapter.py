@@ -88,6 +88,8 @@ class GroqLLMAdapter:
                     timeout=120,
                 )
                 if r.status_code == 429:
+                    if attempt == 5:
+                        return '{"_quota_exhausted": true}'
                     # Exponential backoff: 10s, 30s, 60s, 120s, 180s, 300s
                     wait = [10, 30, 60, 120, 180, 300][attempt]
                     logger.warning(f"Groq Rate Limit (429). Attempt {attempt+1}/6. Waiting {wait}s...")
