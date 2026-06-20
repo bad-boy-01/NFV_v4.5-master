@@ -358,35 +358,64 @@ class UnifiedPipeline:
                     continue
 
                 for c in data.get("characters", []):
+                    if not isinstance(c, dict):
+                        continue
+                    name = c.get("canonical_name") or c.get("name", "")
+                    if not name or str(name).strip().lower() in ["", "unknown", "none"]:
+                        logger.warning(f"  ⚠️  Skipping character with invalid name: {name}")
+                        continue
+                        
                     cid = str(uuid.uuid4())[:8]
-                    self.memory_db.add_character(cid, c.get("canonical_name", "Unknown"),
-                                                 c.get("visual_dna", {}),
+                    
+                    # Merge legacy visual_dna and new explicit fields
+                    visual_dna = c.get("visual_dna", {})
+                    if "gender" in c or "description" in c or "role" in c:
+                        if "gender" in c: visual_dna["gender"] = c["gender"]
+                        if "description" in c: visual_dna["description"] = c["description"]
+                        if "role" in c: visual_dna["role"] = c["role"]
+
+                    self.memory_db.add_character(cid, name.strip(),
+                                                 visual_dna,
                                                  c.get("current_state", {}))
+                                                 
                 for loc in data.get("locations", []):
+                    if not isinstance(loc, dict):
+                        continue
+                    name = loc.get("canonical_name") or loc.get("name", "")
+                    if not name or str(name).strip().lower() in ["", "unknown", "none"]:
+                        logger.warning(f"  ⚠️  Skipping location with invalid name: {name}")
+                        continue
+
                     v_tags = loc.get("visual_tags", "")
                     if isinstance(v_tags, list):
                         v_tags = ", ".join(v_tags)
+                        
                     self.memory_db.add_location(
-                        loc.get("canonical_name", "Unknown"),
+                        name.strip(),
                         loc.get("description", ""),
                         v_tags,
                     )
+                    
                 for concept in data.get("world_concepts", []):
+                    if not isinstance(concept, dict): continue
                     self.memory_db.add_world_concept(
                         concept.get("concept_type", "misc"),
                         concept.get("name", "Unknown"),
                         concept.get("description", ""),
                     )
+                    
                 for rel in data.get("relationships", []):
+                    if not isinstance(rel, dict): continue
                     self.memory_db.add_relationship(
                         rel.get("char1", ""), rel.get("char2", ""),
                         rel.get("type", "other"), rel.get("description", ""),
                     )
+                    
                 for event in data.get("events", []):
                     if not isinstance(event, dict):
                         logger.warning(f"  ⚠️  Invalid event format: {event}")
                         continue
-                    inv_chars = event.get("involved_characters", [])
+                    inv_chars = event.get("involved_characters") or event.get("characters", [])
                     if isinstance(inv_chars, list):
                         inv_chars = ", ".join(inv_chars)
                     self.memory_db.add_event(
