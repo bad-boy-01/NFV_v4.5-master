@@ -224,12 +224,8 @@ class LocalImageAdapter:
         try:
             from compel import Compel, ReturnedEmbeddingsType
             import torch
-            device = self.pipeline.device if self.pipeline else "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             
-            # Move text encoders to the correct device before initializing Compel
-            self.pipeline.text_encoder.to(device)
-            self.pipeline.text_encoder_2.to(device)
-
             # SDXL configuration for Compel
             self._compel = Compel(
                 tokenizer=[self.pipeline.tokenizer, self.pipeline.tokenizer_2],
@@ -385,24 +381,10 @@ class LocalImageAdapter:
 
         import torch
         
-        # Check token length and compress if needed
+        # Check token length
         input_ids = self.pipeline.tokenizer(prompt).input_ids
         prompt_token_length = len(input_ids)
         logger.info(f"Prompt token length: {prompt_token_length}")
-        
-        if prompt_token_length > 77:
-            logger.warning(f"Prompt exceeds CLIP limits ({prompt_token_length} > 77). Compressing...")
-            # Automatically compress prompt: keep first few and last few comma-separated phrases
-            parts = [p.strip() for p in prompt.split(",") if p.strip()]
-            if len(parts) > 5:
-                # Keep first 3 (usually quality tags/subject) and last 2 (usually style tags)
-                compressed_parts = parts[:3] + parts[-2:]
-                prompt = ", ".join(compressed_parts)
-            else:
-                prompt = prompt[:200]  # Hard string truncation if not easily split
-                
-            compressed_length = len(self.pipeline.tokenizer(prompt).input_ids)
-            logger.info(f"Truncated length: {compressed_length}")
 
         self._ensure_compel()
         kwargs = None
@@ -412,6 +394,8 @@ class LocalImageAdapter:
                 # 1. Get embeddings
                 p_emb, p_pooled = self._compel(prompt)
                 n_emb, n_pooled = self._compel(negative_prompt or MASTER_NEGATIVE)
+                
+                logger.info(f"  Compel encoded shape: {p_emb.shape} on device: {p_emb.device}")
                 
                 # 2. Manual padding for sequence length mismatch
                 # Compel for SDXL returns [1, Seq, 2048] for emb and [1, 1280] for pooled
@@ -442,7 +426,8 @@ class LocalImageAdapter:
                     "guidance_scale": cfg,
                 }
             except Exception as e:
-                logger.warning(f"  Compel encoding failed ({e}) — using plain prompt")
+                logger.exception(f"  Compel encoding failed ({e}) — using plain prompt")
+                logger.error(f"  Debug Info - Prompt Length: {prompt_token_length}, Expected Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
                 kwargs = None
 
         if kwargs is None:

@@ -172,23 +172,60 @@ class MemoryEngine:
             return
 
         with self.Session() as s:
-            # Check for existing alias in database
-            # This is a bit naive (SQL LIKE), but effective for "(descriptor)" patterns
+            from sqlalchemy import func
             existing = s.query(Character).filter(
-                (Character.canonical_name == name) | 
-                (Character.canonical_name.like(f"{base_name}%"))
+                func.lower(Character.canonical_name) == name.lower()
             ).first()
             
             if existing:
                 e_dna = existing.visual_dna if existing.visual_dna is not None else {}
                 v_dna = visual_dna if visual_dna is not None else {}
-                merged_dna = {**e_dna, **v_dna}
+                
+                merged_dna = dict(e_dna)
+                
+                # Appearance accumulation
+                old_conf = float(merged_dna.get("appearance_confidence", 0.0))
+                new_conf = float(v_dna.get("appearance_confidence", 0.0))
+                
+                for k, v in v_dna.items():
+                    if k == "appearance_confidence":
+                        merged_dna[k] = max(old_conf, new_conf)
+                        continue
+                        
+                    # If it's a list (like distinctive_features), append and deduplicate
+                    if isinstance(v, list):
+                        existing_list = merged_dna.get(k, [])
+                        if not isinstance(existing_list, list):
+                            existing_list = [existing_list] if existing_list else []
+                        merged_list = existing_list + [x for x in v if x not in existing_list and x]
+                        if merged_list:
+                            merged_dna[k] = merged_list
+                        continue
+                        
+                    # If it's a string, only overwrite if populated AND (it was empty OR new confidence > old)
+                    if isinstance(v, str) and v.strip() and v.strip().lower() not in {"none", "unknown", "n/a", "not specified"}:
+                        existing_val = merged_dna.get(k, "")
+                        is_empty = not existing_val or existing_val.strip().lower() in {"none", "unknown", "n/a", "not specified"}
+                        
+                        if is_empty:
+                            merged_dna[k] = v.strip()
+                        elif new_conf > old_conf:
+                            merged_dna[k] = v.strip()
+                        elif new_conf == old_conf and v.strip() not in existing_val:
+                            # Append to existing description if same confidence but different detail
+                            merged_dna[k] = f"{existing_val}, {v.strip()}"
+
                 existing.visual_dna = merged_dna
                 
                 if existing.current_state:
                     merged_state = {**existing.current_state, **current_state}
                 else:
                     merged_state = current_state
+                    
+                # Importance is persistent, keep highest
+                if "importance" in existing.current_state and "importance" in current_state:
+                    merged_state["importance"] = max(existing.current_state["importance"], current_state["importance"])
+                    
                 existing.current_state = merged_state
             else:
                 s.add(Character(id=char_id, canonical_name=name, visual_dna=visual_dna, current_state=current_state))
@@ -222,7 +259,8 @@ class MemoryEngine:
             return
 
         with self.Session() as s:
-            if not s.query(Location).filter_by(canonical_name=name).first():
+            from sqlalchemy import func
+            if not s.query(Location).filter(func.lower(Location.canonical_name) == name.lower()).first():
                 s.add(Location(canonical_name=name, description=description,
                                visual_tags=visual_tags))
 

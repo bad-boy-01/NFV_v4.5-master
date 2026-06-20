@@ -25,6 +25,16 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _canonicalize_name(name: str) -> str:
+    if not isinstance(name, str):
+        return ""
+    name = re.sub(r"\s+", " ", name).strip()
+    lower_name = name.lower()
+    for article in ("the ", "a ", "an "):
+        if lower_name.startswith(article):
+            return name[len(article):].strip()
+    return name
+
 def _chunk_text(text: str, max_words: int = 500) -> list:
     """Split text into chunks using SmartChunker while maintaining legacy dict format."""
     from core.utils.chunker import SmartChunker
@@ -360,38 +370,51 @@ class UnifiedPipeline:
                 for c in data.get("characters", []):
                     if not isinstance(c, dict):
                         continue
-                    name = c.get("canonical_name") or c.get("name", "")
-                    if not name or str(name).strip().lower() in ["", "unknown", "none"]:
-                        logger.warning(f"  ⚠️  Skipping character with invalid name: {name}")
+                    raw_name = c.get("canonical_name") or c.get("name", "")
+                    if not raw_name or str(raw_name).strip().lower() in ["", "unknown", "none"]:
+                        logger.warning(f"  ⚠️  Skipping character with invalid name: {raw_name}")
                         continue
                         
+                    name = _canonicalize_name(str(raw_name))
                     cid = str(uuid.uuid4())[:8]
                     
-                    # Merge legacy visual_dna and new explicit fields
-                    visual_dna = c.get("visual_dna", {})
-                    if "gender" in c or "description" in c or "role" in c:
-                        if "gender" in c: visual_dna["gender"] = c["gender"]
-                        if "description" in c: visual_dna["description"] = c["description"]
-                        if "role" in c: visual_dna["role"] = c["role"]
+                    visual_dna = {
+                        "age": c.get("age", ""),
+                        "gender": c.get("gender", ""),
+                        "hair": c.get("hair", ""),
+                        "eyes": c.get("eyes", ""),
+                        "face": c.get("face", ""),
+                        "build": c.get("build", ""),
+                        "clothing": c.get("clothing", ""),
+                        "accessories": c.get("accessories", ""),
+                        "distinctive_features": c.get("distinctive_features", []),
+                        "appearance_confidence": c.get("appearance_confidence", 0.0),
+                        "role": c.get("role", "")
+                    }
+                    
+                    current_state = c.get("current_state", {})
+                    current_state["importance"] = c.get("importance", 5)
 
-                    self.memory_db.add_character(cid, name.strip(),
+                    self.memory_db.add_character(cid, name,
                                                  visual_dna,
-                                                 c.get("current_state", {}))
+                                                 current_state)
                                                  
                 for loc in data.get("locations", []):
                     if not isinstance(loc, dict):
                         continue
-                    name = loc.get("canonical_name") or loc.get("name", "")
-                    if not name or str(name).strip().lower() in ["", "unknown", "none"]:
-                        logger.warning(f"  ⚠️  Skipping location with invalid name: {name}")
+                    raw_name = loc.get("canonical_name") or loc.get("name", "")
+                    if not raw_name or str(raw_name).strip().lower() in ["", "unknown", "none"]:
+                        logger.warning(f"  ⚠️  Skipping location with invalid name: {raw_name}")
                         continue
+
+                    name = _canonicalize_name(str(raw_name))
 
                     v_tags = loc.get("visual_tags", "")
                     if isinstance(v_tags, list):
                         v_tags = ", ".join(v_tags)
                         
                     self.memory_db.add_location(
-                        name.strip(),
+                        name,
                         loc.get("description", ""),
                         v_tags,
                     )
@@ -497,7 +520,15 @@ class UnifiedPipeline:
             with open(style_file, "r", encoding="utf-8") as f:
                 world_style = f.read().strip()
 
+        gen_all = self.pm.config.get("project", {}).get("generate_all_character_sheets", False)
+        min_importance = self.pm.config.get("project", {}).get("min_character_importance", 7)
+
         for char in characters:
+            importance = char.get("current_state", {}).get("importance", 5)
+            if not gen_all and importance < min_importance:
+                logger.info(f"  Skipping {char.get('canonical_name')}: importance {importance} < {min_importance}")
+                continue
+
             char_id = char["id"]
             char_name = char["canonical_name"]
             dna = char.get("visual_dna", {})

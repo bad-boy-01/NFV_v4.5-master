@@ -41,8 +41,17 @@ class MemoryExtractor:
             '  "characters": [\n'
             "    {\n"
             '      "name": "",\n'
+            '      "importance": 5,\n'
+            '      "age": "",\n'
             '      "gender": "",\n'
-            '      "description": "",\n'
+            '      "hair": "",\n'
+            '      "eyes": "",\n'
+            '      "face": "",\n'
+            '      "build": "",\n'
+            '      "clothing": "",\n'
+            '      "accessories": "",\n'
+            '      "distinctive_features": [],\n'
+            '      "appearance_confidence": 0.0,\n'
             '      "role": ""\n'
             "    }\n"
             "  ],\n"
@@ -113,8 +122,17 @@ class MemoryExtractor:
             '  "characters": [\n'
             "    {\n"
             '      "name": "",\n'
+            '      "importance": 5,\n'
+            '      "age": "",\n'
             '      "gender": "",\n'
-            '      "description": "",\n'
+            '      "hair": "",\n'
+            '      "eyes": "",\n'
+            '      "face": "",\n'
+            '      "build": "",\n'
+            '      "clothing": "",\n'
+            '      "accessories": "",\n'
+            '      "distinctive_features": [],\n'
+            '      "appearance_confidence": 0.0,\n'
             '      "role": ""\n'
             "    }\n"
             "  ]\n"

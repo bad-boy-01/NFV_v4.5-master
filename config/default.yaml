@@ -7,6 +7,8 @@ project:
   language:
     source: "auto"     # "auto" = detect language, or set "Korean" / "Chinese" / "English"
     target: "English"
+  generate_all_character_sheets: false
+  min_character_importance: 7
 
 # ─── Models ──────────────────────────────────────────────────
 models:
@@ -88,7 +90,7 @@ quality_filter:
 
 # ─── Character Sheets ────────────────────────────────────────
 character_sheet:
-  enabled: true
+  enabled: false
   poses:
     - "front"
     # Additional poses (smile, angry, crying, fight, sit) can be enabled
